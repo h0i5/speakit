@@ -1,0 +1,99 @@
+# speakit
+
+System-wide **push-to-toggle voice-to-text** for Arch + Hyprland. Press a key to
+start recording, press again to stop — the transcription is typed straight into
+whatever window has focus (Claude Code terminal, browser search, any web textbox).
+
+A local, free, private alternative to Claude Code `/voice` that works **everywhere**.
+
+## How it works
+
+```
+Hyprland bind ─► speakit-toggle ─unix socket─► speakitd (daemon)
+  (SUPER+D)       (thin client)                ├─ faster-whisper model resident in VRAM
+                                               ├─ pw-record → 16k mono WAV
+                                               ├─ transcribe (large-v3-turbo, CUDA, en)
+                                               ├─ ydotool type → focused window
+                                               └─ notify-send + waybar indicator
+```
+
+The daemon keeps the Whisper model loaded in GPU memory, so each dictation only
+pays transcription time (a few hundred ms for short clips) — not the ~3–5s model
+load. First toggle starts recording; second stops, transcribes, and types.
+
+- **Engine**: faster-whisper `large-v3-turbo` on CUDA (`float16`, English).
+- **Injection**: `ydotool` (kernel uinput) — works in terminals, browsers, Electron, XWayland.
+- **Audio**: PipeWire `pw-record`.
+
+## Install
+
+```bash
+cd ~/Desktop/web/speakit
+./install.sh
+```
+
+The installer: installs `ydotool`/`pipewire`/`libnotify`, sets `/dev/uinput`
+permissions (udev rule + adds you to the `input` group), `uv sync`s the Python
+env, and installs+enables the `ydotoold` and `speakit` **user** systemd services.
+
+> If it added you to the `input` group, **log out and back in**, then
+> `systemctl --user restart ydotoold speakit`.
+
+Then add the Hyprland keybind (installer prints the exact line):
+
+```
+bind = SUPER, D, exec, ~/Desktop/web/speakit/.venv/bin/speakit-toggle
+```
+
+## Usage
+
+- **SUPER+D** → 🎙 notification, speak.
+- **SUPER+D** again → transcribes, types text at the cursor, ✓ notification.
+
+CLI equivalents (for testing without the keybind):
+
+```bash
+uv run speakit-toggle          # toggle start/stop
+uv run speakit-toggle status   # idle | recording
+```
+
+## Config (env vars)
+
+Set in `~/.config/systemd/user/speakit.service` (`Environment=...`) or your shell:
+
+| Var | Default | Notes |
+|-----|---------|-------|
+| `SPEAKIT_MODEL` | `large-v3-turbo` | any faster-whisper model (`large-v3`, `distil-large-v3`, ...) |
+| `SPEAKIT_DEVICE` | `cuda` | `cpu` falls back automatically if CUDA fails |
+| `SPEAKIT_COMPUTE_TYPE` | `float16` | `int8_float16` to save VRAM |
+| `SPEAKIT_LANGUAGE` | `en` | force language (skips detection) |
+| `SPEAKIT_BEAM_SIZE` | `5` | lower = faster, slightly less accurate |
+| `SPEAKIT_MIC` | (default source) | PipeWire source name/id; `pactl list short sources` |
+| `SPEAKIT_WAYBAR_SIGNAL` | `8` | must match `"signal"` in your waybar module |
+| `SPEAKIT_NOTIFY` | `1` | `0` disables desktop notifications |
+
+## Waybar indicator (optional)
+
+```jsonc
+"custom/speakit": {
+  "exec": "~/Desktop/web/speakit/waybar/speakit.sh",
+  "return-type": "json",
+  "signal": 8,
+  "interval": "once"
+}
+```
+
+```css
+#custom-speakit.recording { color: #ff5555; }
+```
+
+The daemon pokes waybar (`SIGRTMIN+8`) on every state change for instant updates.
+
+## Troubleshooting
+
+- **Nothing types / `ydotool failed`** → ydotoold not running or no uinput perms.
+  `systemctl --user status ydotoold`; confirm you're in the `input` group (`id`) and relogged.
+- **`daemon not running`** → `systemctl --user status speakit`; logs: `journalctl --user -u speakit -f`.
+- **Loaded on CPU (slow)** → check daemon log for the CUDA load error; ensure NVIDIA
+  driver present. faster-whisper pulls its own CUDA libs via pip; no system CUDA toolkit needed.
+- **Wrong mic** → set `SPEAKIT_MIC` (see `pactl list short sources`).

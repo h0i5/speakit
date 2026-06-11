@@ -1,0 +1,25 @@
+[project]
+name = "speakit"
+version = "0.1.0"
+description = "System-wide push-to-toggle voice-to-text for Hyprland. Types transcription into the active window."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "faster-whisper>=1.1.0",
+    # CUDA runtime libs matching ctranslate2 (needs CUDA 12 + cuDNN 9).
+    # System CUDA may be a different major; these wheels are self-contained
+    # and preloaded by speakit.cuda before ctranslate2 imports.
+    "nvidia-cublas-cu12>=12.3",
+    "nvidia-cudnn-cu12>=9,<10",
+]
+
+[project.scripts]
+speakitd = "speakit.daemon:main"
+speakit-toggle = "speakit.client:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/speakit"]

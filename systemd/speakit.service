@@ -1,0 +1,20 @@
+[Unit]
+Description=speakit voice-to-text daemon
+After=graphical-session.target ydotoold.service
+Wants=ydotoold.service
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+# Point this at the project dir if you move it.
+WorkingDirectory=%h/Desktop/web/speakit
+ExecStart=/usr/bin/uv run speakitd
+Restart=on-failure
+RestartSec=2
+# Keep the HF model cache warm across restarts.
+Environment=HF_HOME=%h/.cache/huggingface
+# Talk to the same ydotoold socket the user unit creates.
+Environment=YDOTOOL_SOCKET=%t/.ydotool_socket
+
+[Install]
+WantedBy=graphical-session.target

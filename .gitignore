@@ -1,0 +1,56 @@
+# --- Python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+*.so
+
+# --- uv / virtualenv -------------------------------------------------------
+.venv/
+venv/
+.python-version
+# uv.lock IS committed (reproducible installs) — do not ignore it.
+
+# --- Caches / runtime ------------------------------------------------------
+.cache/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.log
+
+# speakit runtime artifacts (sockets/state/wav live in XDG_RUNTIME_DIR, but
+# guard against any local strays)
+*.sock
+*.wav
+speakit.state
+
+# Whisper / HF model weights — never commit (huge, redownloadable)
+*.bin
+*.ct2
+models/
+
+# --- AI assistant / tooling files ------------------------------------------
+.claude/
+.claude*
+CLAUDE.md
+CLAUDE.local.md
+.cursor/
+.cursorrules
+.aider*
+.continue/
+.windsurf/
+.codeium/
+.github/copilot-instructions.md
+*.plan.md
+.plan/
+
+# --- Editor / OS -----------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

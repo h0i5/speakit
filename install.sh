@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# speakit installer: deps, ydotool uinput perms, systemd user units.
+# Idempotent — safe to re-run.
+set -euo pipefail
+
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+USER_SYSTEMD="$HOME/.config/systemd/user"
+UDEV_RULE="/etc/udev/rules.d/80-speakit-uinput.rules"
+
+say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*"; }
+
+# 1. System packages -------------------------------------------------------
+say "Installing system packages (ydotool, pipewire tools, libnotify)..."
+need_pkgs=()
+command -v ydotool   >/dev/null || need_pkgs+=(ydotool)
+command -v pw-record >/dev/null || need_pkgs+=(pipewire)
+command -v notify-send >/dev/null || need_pkgs+=(libnotify)
+if [ ${#need_pkgs[@]} -gt 0 ]; then
+    sudo pacman -S --needed "${need_pkgs[@]}"
+else
+    say "All system packages already present."
+fi
+
+# 2. uinput permissions ----------------------------------------------------
+# ydotoold needs write access to /dev/uinput. Give the 'input' group access
+# and add the user to it, so ydotoold can run as your user (no root daemon).
+say "Configuring /dev/uinput permissions..."
+if [ ! -f "$UDEV_RULE" ]; then
+    echo 'KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' \
+        | sudo tee "$UDEV_RULE" >/dev/null
+    sudo udevadm control --reload-rules
+    sudo udevadm trigger /dev/uinput || true
+    say "udev rule installed."
+else
+    say "udev rule already present."
+fi
+
+if ! id -nG "$USER" | tr ' ' '\n' | grep -qx input; then
+    sudo usermod -aG input "$USER"
+    warn "Added $USER to 'input' group. LOG OUT and back in for it to take effect."
+else
+    say "User already in 'input' group."
+fi
+
+# 3. Python env ------------------------------------------------------------
+say "Syncing Python env with uv (downloads faster-whisper + CUDA wheels)..."
+( cd "$PROJECT_DIR" && uv sync )
+
+# 4. systemd user units ----------------------------------------------------
+say "Installing systemd user units..."
+mkdir -p "$USER_SYSTEMD"
+cp "$PROJECT_DIR/systemd/ydotoold.service" "$USER_SYSTEMD/"
+cp "$PROJECT_DIR/systemd/speakit.service"  "$USER_SYSTEMD/"
+systemctl --user daemon-reload
+systemctl --user enable --now ydotoold.service || warn "ydotoold start failed (relog if perms just changed)"
+systemctl --user enable --now speakit.service  || warn "speakit start failed (check: journalctl --user -u speakit)"
+
+chmod +x "$PROJECT_DIR/waybar/speakit.sh"
+
+# 5. Snippets --------------------------------------------------------------
+cat <<EOF
+
+\033[1;32mDone.\033[0m  Two manual config steps:
+
+1) Hyprland — add to ~/.config/hypr/hyprland.conf:
+
+   bind = SUPER, D, exec, $PROJECT_DIR/.venv/bin/speakit-toggle
+
+   (services autostart via systemd; no exec-once needed)
+
+2) Waybar (optional indicator) — add module to ~/.config/waybar/config:
+
+   "custom/speakit": {
+     "exec": "$PROJECT_DIR/waybar/speakit.sh",
+     "return-type": "json",
+     "signal": 8,
+     "interval": "once"
+   }
+
+   ...and put "custom/speakit" in your modules list. Style in style.css:
+     #custom-speakit.recording { color: #ff5555; }
+
+If you were just added to the 'input' group, LOG OUT/IN, then:
+   systemctl --user restart ydotoold speakit
+
+Test:  press SUPER+D, speak, press again — text types into the focused window.
+EOF
