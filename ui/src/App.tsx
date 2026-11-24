@@ -249,9 +249,10 @@ export default function App() {
   return (
     <Tabs orientation="vertical" selectedKey={page} onSelectionChange={setPage} className="grid h-screen grid-cols-[176px_1fr]">
       <aside className="flex flex-col border-r border-black/40 bg-neutral-950 px-2 py-4">
-        <div className="mb-4 flex items-center gap-2.5 px-2">
-          <img src="/favicon.svg" alt="" className="size-6" />
-          <div className="text-[14px] font-semibold tracking-[-0.01em] text-text-primary">speakit</div>
+        {/* Lockup: mark height ~1.5x the wordmark's cap height, gap ~0.4x mark. */}
+        <div className="mb-5 flex h-8 items-center gap-2 px-2">
+          <img src="/favicon.svg" alt="" className="size-[19px] translate-y-px" />
+          <div className="text-[18px] leading-none font-semibold tracking-[-0.03em] text-text-primary">speakit</div>
         </div>
         <div ref={nav} className="relative">
           {/* One highlight that glides to the selected item (transform only, so it can be retargeted mid-move). */}
