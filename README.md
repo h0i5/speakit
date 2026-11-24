@@ -23,6 +23,8 @@ pays transcription time (tens of ms for short clips), not the model load. First 
 - **Engine**: NVIDIA Parakeet TDT 0.6B v2 via [onnx-asr](https://github.com/istupakov/onnx-asr) on CUDA (English, punctuated).
 - **Injection**: `ydotool` (kernel uinput) — works in terminals, browsers, Electron, XWayland.
 - **Audio**: PipeWire `pw-record`.
+- **Cleanup** (opt-in per dictation): Qwen3-4B-Instruct Q4 on llama.cpp/Vulkan
+  (`speakit-llm.service`, ~2.8 GB VRAM, ~0.2–0.8 s). If it's down, raw text is typed.
 
 ## Install
 
@@ -51,6 +53,11 @@ bindr = SUPER, D, exec, ~/Desktop/web/speakit/.venv/bin/speakit-toggle release
 - **Tap** SUPER+D → recording starts; **tap** again → transcribes and types at the cursor.
 - **Hold** SUPER+D while speaking → stops and types on release (push-to-talk).
   A press shorter than `SPEAKIT_HOLD_SECONDS` (0.4) counts as a tap.
+- **Insert + SUPER+D** (hold Insert when starting, or tap it mid-recording) →
+  cleanup mode: a local LLM fixes grammar, drops false starts, applies
+  self-corrections ("3, no, 4" → "4") and formats lists/paragraphs. Waybar shows
+  `REC+`. Line breaks are typed as Shift+Enter so chat apps don't send early.
+- Recordings auto-stop after `SPEAKIT_MAX_RECORD_SECONDS` (120).
 
 CLI equivalents (for testing without the keybind):
 
@@ -72,6 +79,9 @@ Set in `~/.config/systemd/user/speakit.service` (`Environment=...`) or your shel
 | `SPEAKIT_MIC` | (default source) | PipeWire source name/id; `pactl list short sources` |
 | `SPEAKIT_WAYBAR_SIGNAL` | `8` | must match `"signal"` in your waybar module |
 | `SPEAKIT_NOTIFY` | `0` | `1` enables desktop notifications |
+| `SPEAKIT_LLM_URL` | `http://127.0.0.1:8765/v1/chat/completions` | any OpenAI-compatible endpoint |
+| `SPEAKIT_LLM_TIMEOUT` | `8` | seconds before falling back to raw text |
+| `SPEAKIT_MAX_RECORD_SECONDS` | `120` | auto-stop |
 | `SPEAKIT_REPLACEMENTS` | `~/.config/speakit/replacements.txt` | word fixes, see below |
 
 ## Transcript cleanup

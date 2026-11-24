@@ -17,6 +17,7 @@ need_pkgs=()
 command -v ydotool   >/dev/null || need_pkgs+=(ydotool)
 command -v pw-record >/dev/null || need_pkgs+=(pipewire)
 command -v notify-send >/dev/null || need_pkgs+=(libnotify)
+command -v llama-server >/dev/null || need_pkgs+=(llama-cpp ggml-vulkan)
 if [ ${#need_pkgs[@]} -gt 0 ]; then
     sudo pacman -S --needed "${need_pkgs[@]}"
 else
@@ -53,14 +54,20 @@ fi
 say "Syncing Python env with uv (downloads onnx-asr + CUDA wheels)..."
 ( cd "$PROJECT_DIR" && uv sync )
 
+say "Fetching cleanup LLM (Qwen3-4B-Instruct Q4, ~2.4 GB, skipped if present)..."
+"$PROJECT_DIR/.venv/bin/hf" download unsloth/Qwen3-4B-Instruct-2507-GGUF \
+    Qwen3-4B-Instruct-2507-Q4_K_M.gguf --local-dir "$HOME/.cache/speakit/llm" >/dev/null
+
 # 4. systemd user units ----------------------------------------------------
 say "Installing systemd user units..."
 mkdir -p "$USER_SYSTEMD"
 cp "$PROJECT_DIR/systemd/ydotoold.service" "$USER_SYSTEMD/"
 cp "$PROJECT_DIR/systemd/speakit.service"  "$USER_SYSTEMD/"
+cp "$PROJECT_DIR/systemd/speakit-llm.service" "$USER_SYSTEMD/"
 systemctl --user daemon-reload
 systemctl --user enable --now ydotoold.service || warn "ydotoold start failed (relog if perms just changed)"
 systemctl --user enable --now speakit.service  || warn "speakit start failed (check: journalctl --user -u speakit)"
+systemctl --user enable --now speakit-llm.service || warn "speakit-llm start failed (check: journalctl --user -u speakit-llm)"
 
 chmod +x "$PROJECT_DIR/waybar/speakit.sh"
 
@@ -74,7 +81,11 @@ cat <<EOF
    bind  = SUPER, D, exec, $PROJECT_DIR/.venv/bin/speakit-toggle press
    bindr = SUPER, D, exec, $PROJECT_DIR/.venv/bin/speakit-toggle release
 
+   bind  = , Insert, exec, $PROJECT_DIR/.venv/bin/speakit-toggle clean-down
+   bindr = , Insert, exec, $PROJECT_DIR/.venv/bin/speakit-toggle clean-up
+
    Tap = toggle (tap again to stop). Hold = push-to-talk (release to stop).
+   Hold Insert while pressing SUPER+D = LLM cleanup + formatting.
 
    (services autostart via systemd; no exec-once needed)
 

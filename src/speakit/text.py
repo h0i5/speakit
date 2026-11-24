@@ -7,13 +7,16 @@ from pathlib import Path
 
 # Parakeet transcribes hesitations verbatim ("message uh aligns"). Drop them,
 # eating an adjacent comma so "I think, uh, we" -> "I think we".
+# Typographic punctuation NFKD can't fold (LLM output); map before folding.
+_PUNCT = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"',
+                        "\u2013": "-", "\u2014": " - ", "\u2026": "..."})
 _FILLER = re.compile(r",?\s*\b(?:uh+|um+|uhm|erm|hmm+|mm+)\b,?", re.IGNORECASE)
 
 
 def clean(text: str) -> str:
     # ydotool types US-layout ASCII only and silently drops anything else, so
     # fold accents ("café" -> "cafe") rather than lose the letters.
-    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    text = unicodedata.normalize("NFKD", text.translate(_PUNCT)).encode("ascii", "ignore").decode()
     out = _FILLER.sub("", text).strip()
     if not any(c.isalnum() for c in out):
         return ""
@@ -51,6 +54,7 @@ if __name__ == "__main__":
     assert clean("It was, um.") == "It was."
     assert clean("Uh.") == ""
     assert clean("Mm.") == ""
+    assert clean("It\u2019s \u201cdone\u201d\u2014mostly\u2026") == 'It\'s "done" - mostly...'
     assert clean("A café in São Paulo, naïve.") == "A cafe in Sao Paulo, naive."
     assert clean("  Bring an umbrella, Uhura. ") == "Bring an umbrella, Uhura."
     import tempfile

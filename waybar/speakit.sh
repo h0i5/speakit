@@ -3,6 +3,7 @@
 # aligns with the rest of the bar. Glyphs are emitted as explicit UTF-8 byte
 # escapes so they survive editing tools that strip private-use chars.
 #   recording -> mic + REC   (red via .recording)
+#   recording-polish -> mic + REC+  (LLM cleanup armed; .recording too)
 #   done      -> check       (green via .done) ~2s then auto-hides
 #   idle      -> ""          (empty text => waybar hides the module)
 # Refreshed instantly when the daemon sends SIGRTMIN+8 (match "signal": 8).
@@ -16,6 +17,9 @@ check=$(printf '\xef\x80\x8c')  # nf-fa-check       U+F00C
 case "$state" in
     recording)
         printf '{"text":"%s REC","class":"recording","tooltip":"speakit recording — press again to stop"}\n' "$mic"
+        ;;
+    recording-polish)
+        printf '{"text":"%s REC+","class":"recording","tooltip":"speakit recording + cleanup — press again to stop"}\n' "$mic"
         ;;
     done)
         printf '{"text":"%s","class":"done","tooltip":"speakit: transcription done"}\n' "$check"

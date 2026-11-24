@@ -1,0 +1,16 @@
+[Unit]
+Description=speakit LLM cleanup server (llama.cpp)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+# Qwen3-4B-Instruct Q4 fully on GPU (Vulkan): ~3 GB VRAM. Small context:
+# prompts are one dictation. Loopback only.
+ExecStart=/usr/bin/llama-server -m %h/.cache/speakit/llm/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
+    --host 127.0.0.1 --port 8765 -ngl 999 -c 2048 -np 1 --no-webui
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

@@ -18,11 +18,14 @@ import threading
 import time
 
 from . import config as cfg
+from .polish import polish
 from .text import clean, load_replacements, replace
 
 # Logic states.
 IDLE = "idle"
 RECORDING = "recording"
+# Display-only: recording with the LLM cleanup pass armed (clean key held).
+RECORDING_POLISH = "recording-polish"
 # Transient display-only state shown after a successful type (the ✓ tick).
 DONE = "done"
 
@@ -61,6 +64,11 @@ class Daemon:
         self.model = None  # lazy import + load in run()
         # Monotonic generation so a stale "done" timer can't clear a newer state.
         self._display_gen = 0
+        # Clean key (Insert) held right now / armed for the current recording.
+        self.clean_held = False
+        self.polish = False
+        # Socket handler and the auto-stop timer thread both drive state.
+        self.lock = threading.Lock()
 
     def flash_done(self) -> None:
         """Show the ✓ tick, then auto-hide after cfg.DONE_TICK_SECONDS."""
@@ -92,10 +100,20 @@ class Daemon:
             notify("speakit error", "pw-record not found", urgency="critical")
             log("pw-record missing")
             return
-        self.rec_started = time.monotonic()
+        self.rec_started = started = time.monotonic()
         self.state = RECORDING
+        self.polish = self.clean_held
         self._display_gen += 1  # invalidate any pending done-tick timer
-        set_state(RECORDING)
+        set_state(RECORDING_POLISH if self.polish else RECORDING)
+
+        def auto_stop() -> None:
+            if self.state == RECORDING and self.rec_started == started:
+                log(f"hit {cfg.MAX_RECORD_SECONDS:.0f}s limit, stopping")
+                self.handle("stop")
+
+        t = threading.Timer(cfg.MAX_RECORD_SECONDS, auto_stop)
+        t.daemon = True
+        t.start()
         notify("🎙 Recording", "speak now — toggle again to stop")
         log("recording started")
 
@@ -103,6 +121,9 @@ class Daemon:
         """Stop recorder cleanly and return the WAV path (empty on failure)."""
         proc, self.rec_proc = self.rec_proc, None
         self.state = IDLE
+        # Hyprland drops the clean key's release bind if Home was pressed
+        # while it was held, so each recording consumes the armed flag.
+        self.clean_held = False
         set_state(IDLE)
         if proc is None:
             return ""
@@ -129,15 +150,22 @@ class Daemon:
         return text
 
     def inject(self, text: str) -> None:
+        # Trailing space so back-to-back dictations don't run together.
+        lines = (text + " ").split("\n")
         try:
-            subprocess.run(
-                ["ydotool", "type",
-                 "--key-delay", cfg.KEY_DELAY,
-                 "--key-hold", cfg.KEY_HOLD,
-                 # Trailing space so back-to-back dictations don't run together.
-                 "--", text + " "],
-                check=True,
-            )
+            for i, line in enumerate(lines):
+                if i:
+                    # Newline as Shift+Enter (keycodes 42 LEFTSHIFT, 28 ENTER):
+                    # a bare Enter would send the message in chat apps/Claude Code.
+                    subprocess.run(["ydotool", "key", "42:1", "28:1", "28:0", "42:0"], check=True)
+                if line:
+                    subprocess.run(
+                        ["ydotool", "type",
+                         "--key-delay", cfg.KEY_DELAY,
+                         "--key-hold", cfg.KEY_HOLD,
+                         "--", line],
+                        check=True,
+                    )
         except FileNotFoundError:
             notify("speakit error", "ydotool not found", urgency="critical")
             log("ydotool missing")
@@ -164,6 +192,10 @@ class Daemon:
             notify("speakit error", f"transcribe failed: {e}", urgency="critical")
             log(f"transcribe error: {e}")
             return "error"
+        if text and self.polish:
+            t0 = time.monotonic()
+            text = replace(clean(polish(text)), load_replacements(cfg.REPLACEMENTS_PATH))
+            log(f"polished in {time.monotonic() - t0:.2f}s: {text!r}")
         if not text:
             notify("speakit", "no speech detected")
             return "empty"
@@ -173,7 +205,10 @@ class Daemon:
         return "typed"
 
     def handle(self, cmd: str) -> str:
-        cmd = cmd.strip().lower()
+        with self.lock:
+            return self._handle(cmd.strip().lower())
+
+    def _handle(self, cmd: str) -> str:
         if cmd == "toggle":
             return self.toggle()
         if cmd == "status":
@@ -185,6 +220,16 @@ class Daemon:
             # (Release after a stopping tap finds state IDLE and does nothing.)
             if self.state == RECORDING and time.monotonic() - self.rec_started >= cfg.HOLD_SECONDS:
                 return self.toggle()
+            return self.state
+        if cmd == "clean-down":
+            # Hold the clean key before or during a recording to arm cleanup.
+            self.clean_held = True
+            if self.state == RECORDING and not self.polish:
+                self.polish = True
+                set_state(RECORDING_POLISH)
+            return self.state
+        if cmd == "clean-up":
+            self.clean_held = False
             return self.state
         if cmd == "stop" and self.state == RECORDING:
             return self.toggle()

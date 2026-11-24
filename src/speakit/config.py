@@ -66,6 +66,15 @@ REPLACEMENTS_PATH = Path(
     or Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "speakit" / "replacements.txt"
 )
 
+# --- LLM cleanup ("clean" key) -------------------------------------------------
+# OpenAI-compatible chat endpoint (llama-server from speakit-llm.service).
+# If it's down or slow, the raw transcript is typed instead.
+LLM_URL = os.environ.get("SPEAKIT_LLM_URL", "http://127.0.0.1:8765/v1/chat/completions")
+LLM_TIMEOUT = float(os.environ.get("SPEAKIT_LLM_TIMEOUT", "8"))
+
+# Auto-stop (and transcribe) a recording left running this long.
+MAX_RECORD_SECONDS = float(os.environ.get("SPEAKIT_MAX_RECORD_SECONDS", "120"))
+
 # --- Feedback --------------------------------------------------------------
 # Real-time signal number waybar listens on (waybar uses SIGRTMIN+N).
 WAYBAR_SIGNAL = int(os.environ.get("SPEAKIT_WAYBAR_SIGNAL", "8"))
