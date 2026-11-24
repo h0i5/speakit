@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import json
-import math
-import struct
 import subprocess
 import time
 import wave
@@ -61,23 +59,30 @@ def resume_media(players: list[str]) -> None:
 
 # --- cue sounds -----------------------------------------------------------------
 def make_cues(directory: Path) -> tuple[Path, Path]:
-    """Write two short soft blips (rising = start, falling = stop) as WAVs."""
-    def blip(path: Path, freqs: tuple[float, float]) -> None:
-        rate, n = 44100, int(44100 * 0.06)
-        frames = bytearray()
-        for f in freqs:
-            for i in range(n):
-                env = math.sin(math.pi * i / n)  # fade in/out, no clicks
-                frames += struct.pack("<h", int(0.18 * 32767 * env * math.sin(2 * math.pi * f * i / rate)))
+    """Write the start/stop cues: two soft low "thocks" like a heavy keycap,
+    rising (230 -> 300 Hz) for start, falling for stop."""
+    import numpy as np  # already loaded by the ASR stack
+
+    rate = 44100
+
+    def thock(f: float) -> "np.ndarray":
+        t = np.arange(int(rate * 0.12)) / rate
+        body = np.sin(2 * np.pi * f * t) * np.exp(-t / 0.025) + 0.4 * np.sin(3 * np.pi * f * t) * np.exp(-t / 0.012)
+        click = np.random.default_rng(1).normal(0, 1, t.size) * np.exp(-t / 0.004) * 0.25
+        return np.convolve(body + click, np.ones(10) / 10, mode="same")  # muffle: cheap low-pass
+
+    def save(path: Path, freqs: tuple[float, float]) -> None:
+        x = np.concatenate([thock(freqs[0]), np.zeros(int(rate * 0.05)), thock(freqs[1])])
+        x = x / np.abs(x).max() * 0.35
         with wave.open(str(path), "wb") as w:
             w.setnchannels(1)
             w.setsampwidth(2)
             w.setframerate(rate)
-            w.writeframes(bytes(frames))
+            w.writeframes((x * 32767).astype("<i2").tobytes())
 
     start, stop = directory / "speakit-start.wav", directory / "speakit-stop.wav"
-    blip(start, (660, 990))
-    blip(stop, (990, 660))
+    save(start, (230, 300))
+    save(stop, (300, 230))
     return start, stop
 
 
