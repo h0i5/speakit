@@ -3,7 +3,7 @@
 # aligns with the rest of the bar. Glyphs are emitted as explicit UTF-8 byte
 # escapes so they survive editing tools that strip private-use chars.
 #   recording        -> dot + REC            (.recording)
-#   recording-polish -> dot + REC + sparkle  (.recording.polish: LLM cleanup armed)
+#   recording-polish -> dot + REC + gold sparkle  (.recording.polish: LLM cleanup armed)
 #   processing       -> hourglass            (.processing: transcribing/cleaning up)
 #   done             -> check                (.done) ~2s then auto-hides
 #   idle             -> ""                   (empty text => waybar hides the module)
@@ -24,7 +24,7 @@ case "$state" in
         printf '{"text":"%s <span foreground=\x27#ff5555\x27>REC</span>","class":"recording","tooltip":"speakit recording, press again to stop"}\n' "$dot"
         ;;
     recording-polish)
-        printf '{"text":"%s <span foreground=\x27#bd93f9\x27>REC</span> <span foreground=\x27#ff79c6\x27>%s</span>","class":["recording","polish"],"tooltip":"speakit recording + cleanup, press again to stop"}\n' "$dot" "$spark"
+        printf '{"text":"%s <span foreground=\x27#ff5555\x27>REC</span> <span foreground=\x27#e5a04b\x27>%s</span>","class":["recording","polish"],"tooltip":"speakit recording + cleanup, press again to stop"}\n' "$dot" "$spark"
         ;;
     processing)
         printf '{"text":"%s","class":"processing","tooltip":"speakit: transcribing"}\n' "$sand"
