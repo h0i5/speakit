@@ -39,6 +39,14 @@ def is_terminal(cls: str) -> bool:
     return cls in TERMINALS
 
 
+# Code editors embed terminals where Ctrl+C with nothing selected is SIGINT.
+EDITORS = {"code", "code-oss", "code-url-handler", "cursor", "vscodium", "dev.zed.zed", "zed"}
+
+
+def is_editor(cls: str) -> bool:
+    return cls in EDITORS or cls.startswith("jetbrains-")
+
+
 # --- media ----------------------------------------------------------------------
 def pause_media() -> list[str]:
     """Pause every MPRIS player that is playing; return their names to resume."""
@@ -120,17 +128,22 @@ def _keys(*combo: int) -> None:
     _run(["ydotool", "key", *downs, *ups])
 
 
-def copy_selection(terminal: bool) -> str:
+def copy_selection(terminal: bool, editor: bool = False) -> str:
     """Text currently selected in the focused window ("" if none).
 
-    Copy shortcut + sentinel: if nothing is selected the copy is a no-op and
-    the sentinel survives. Terminals get Ctrl+Shift+C (Ctrl+C would SIGINT).
-    The user's clipboard is restored afterwards.
+    Terminals and code editors (embedded terminals): read the primary
+    selection, pressing no keys at all, since a copy shortcut can reach a shell as
+    SIGINT. Ceiling: primary keeps the last highlight even after it's cleared.
+    Everything else: copy shortcut + sentinel; if nothing is selected the copy
+    is a no-op and the sentinel survives. The user's clipboard is restored.
     """
+    if terminal or editor:
+        r = _run(["wl-paste", "--primary", "--no-newline", "--type", "text/plain"])
+        return r.stdout.decode("utf-8", "replace") if r.returncode == 0 else ""
     saved = clip_save()
     sentinel = f"speakit-sentinel-{time.monotonic_ns()}"
     _copy(sentinel.encode())
-    _keys(CTRL, SHIFT, C) if terminal else _keys(CTRL, C)
+    _keys(CTRL, C)
     time.sleep(0.2)
     got = _run(["wl-paste", "--no-newline", "--type", "text/plain"]).stdout.decode("utf-8", "replace")
     clip_restore(saved)

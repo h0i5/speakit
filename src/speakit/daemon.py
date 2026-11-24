@@ -224,7 +224,7 @@ class Daemon:
         elif text and self.mode == "command":
             # Read the selection now, not at key press: synthetic copy keys
             # between press and release would make Hyprland drop the release.
-            selection = dk.copy_selection(terminal)
+            selection = dk.copy_selection(terminal, dk.is_editor(cls))
             t0 = time.monotonic()
             text = clean(command(text, selection, style))
             log(f"command in {time.monotonic() - t0:.2f}s [{cls}, {len(selection)} chars selected]: {text!r}")
