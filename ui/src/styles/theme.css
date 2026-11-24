@@ -875,7 +875,7 @@
     transform 420ms cubic-bezier(0.4, 0, 0.2, 1);
 
   &:active:not(:disabled):not([aria-disabled="true"]) {
-    transform: scale(0.98);
+    /* speakit: no press shrink; clicks don't move or resize controls. */
     transition-duration: 150ms, 150ms, 150ms, 150ms, 220ms;
   }
 

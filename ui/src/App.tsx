@@ -260,7 +260,7 @@ export default function App() {
           <TabList aria-label="Settings" className="relative flex flex-col gap-0.5">
             {PAGES.map(({ id, label, icon: I }) => (
               <Tab key={id} id={id} className={({ isSelected, isFocusVisible }) => cx(
-                "flex h-8 cursor-default items-center gap-2 rounded-md px-2 text-[13px] outline-none transition-[color,background-color] duration-150 active:scale-[0.98]",
+                "flex h-8 cursor-default items-center gap-2 rounded-md px-2 text-[13px] outline-none transition-[color,background-color] duration-150",
                 isSelected ? "text-text-primary" : "text-text-secondary hover:bg-neutral-900/60 hover:text-text-primary",
                 isFocusVisible && "ring-2 ring-accent-500",
               )}>
