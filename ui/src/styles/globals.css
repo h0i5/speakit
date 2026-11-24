@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./theme.css";
+@import "./speakit.css";
 @import "./typography.css";
 
 /* ---------------------------------------------------------------------------
@@ -1048,7 +1049,3 @@ input[type="search"]::-webkit-search-cancel-button {
   }
 }
 
-/* App font: Bear Sans UI if installed locally (not bundled), else Inter. */
-:root {
-  --font-inter: "Bear Sans UI", Inter;
-}
