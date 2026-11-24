@@ -24,27 +24,23 @@ STATE_PATH = RUNTIME_DIR / "speakit.state"
 # Temp WAV the recorder writes and the transcriber reads.
 WAV_PATH = RUNTIME_DIR / "speakit.wav"
 
-# --- Whisper model ---------------------------------------------------------
-MODEL = os.environ.get("SPEAKIT_MODEL", "large-v3-turbo")
-DEVICE = os.environ.get("SPEAKIT_DEVICE", "cuda")
-COMPUTE_TYPE = os.environ.get("SPEAKIT_COMPUTE_TYPE", "float16")
-LANGUAGE = os.environ.get("SPEAKIT_LANGUAGE", "en")
-BEAM_SIZE = int(os.environ.get("SPEAKIT_BEAM_SIZE", "5"))
-
-# initial_prompt biases Whisper's vocabulary + style. A romanized Hinglish
-# sample keeps Hindi words in Latin script and primes English<->Hindi
-# code-switching (instead of mangling Hindi or switching to Devanagari).
-# Add your own frequent names/terms here for better proper-noun accuracy.
-# Set SPEAKIT_PROMPT to override; set it empty ("") to disable.
-INITIAL_PROMPT = os.environ.get(
-    "SPEAKIT_PROMPT",
-    "Haan bhai, main thoda busy hoon abhi. Let's catch up kal. "
-    "Yeh wala code push kar do aur PR merge kar dena. "
-    "Mujhe lagta hai ki ye feature theek kaam kar raha hai.",
+# --- ASR model -------------------------------------------------------------
+# Any onnx-asr model name. Parakeet TDT v2: English-only, punctuated output,
+# far more accurate and faster than whisper-large-v3-turbo.
+MODEL = os.environ.get("SPEAKIT_MODEL", "nemo-parakeet-tdt-0.6b-v2")
+DEVICE = os.environ.get("SPEAKIT_DEVICE", "cuda")  # "cpu" to skip the GPU
+# "" = full precision (best on GPU); "int8" = smaller, mainly for CPU.
+QUANTIZATION = os.environ.get("SPEAKIT_QUANTIZATION", "")
+# Model files live here as plain files: onnxruntime >=1.32 rejects the HF hub
+# cache (its symlinks point outside the model dir). Downloaded on first run.
+# ponytail: an interrupted first download leaves a partial dir; delete it to retry.
+MODEL_DIR = Path(
+    os.environ.get("SPEAKIT_MODEL_DIR")
+    or Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "speakit" / MODEL
 )
 
 # --- Audio -----------------------------------------------------------------
-SAMPLE_RATE = 16000  # whisper native
+SAMPLE_RATE = 16000  # model native
 CHANNELS = 1
 # PipeWire source target. Empty = default source. Set SPEAKIT_MIC to override.
 MIC_TARGET = os.environ.get("SPEAKIT_MIC", "")
@@ -67,5 +63,5 @@ NOTIFY = os.environ.get("SPEAKIT_NOTIFY", "0") != "0"
 # How long the ✓ tick stays in waybar after a successful type, then hides.
 DONE_TICK_SECONDS = float(os.environ.get("SPEAKIT_DONE_TICK_SECONDS", "2"))
 
-# Drop trailing newline whisper sometimes adds; trim transcript before typing.
+# Trim surrounding whitespace from the transcript before typing.
 TRIM_OUTPUT = True

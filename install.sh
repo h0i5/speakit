@@ -44,7 +44,7 @@ else
 fi
 
 # 3. Python env ------------------------------------------------------------
-say "Syncing Python env with uv (downloads faster-whisper + CUDA wheels)..."
+say "Syncing Python env with uv (downloads onnx-asr + CUDA wheels)..."
 ( cd "$PROJECT_DIR" && uv sync )
 
 # 4. systemd user units ----------------------------------------------------

@@ -3,14 +3,12 @@ name = "speakit"
 version = "0.1.0"
 description = "System-wide push-to-toggle voice-to-text for Hyprland. Types transcription into the active window."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
-    "faster-whisper>=1.1.0",
-    # CUDA runtime libs matching ctranslate2 (needs CUDA 12 + cuDNN 9).
-    # System CUDA may be a different major; these wheels are self-contained
-    # and preloaded by speakit.cuda before ctranslate2 imports.
-    "nvidia-cublas-cu12>=12.3",
-    "nvidia-cudnn-cu12>=9,<10",
+    "onnx-asr[hub]>=0.12",
+    # [cuda,cudnn] pull self-contained CUDA 13 + cuDNN 9 wheels; the daemon
+    # loads them via onnxruntime.preload_dlls(), so no system CUDA needed.
+    "onnxruntime-gpu[cuda,cudnn]>=1.32",
 ]
 
 [project.scripts]

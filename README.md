@@ -10,18 +10,17 @@ A local, free, private alternative to Claude Code `/voice` that works **everywhe
 
 ```
 Hyprland bind ─► speakit-toggle ─unix socket─► speakitd (daemon)
-  (SUPER+D)       (thin client)                ├─ faster-whisper model resident in VRAM
+  (SUPER+D)       (thin client)                ├─ Parakeet ASR model resident in VRAM  
                                                ├─ pw-record → 16k mono WAV
-                                               ├─ transcribe (large-v3-turbo, CUDA, en)
+                                               ├─ transcribe (Parakeet TDT v2, CUDA)   
                                                ├─ ydotool type → focused window
                                                └─ notify-send + waybar indicator
 ```
 
-The daemon keeps the Whisper model loaded in GPU memory, so each dictation only
-pays transcription time (a few hundred ms for short clips) — not the ~3–5s model
-load. First toggle starts recording; second stops, transcribes, and types.
+The daemon keeps the ASR model loaded in GPU memory, so each dictation only
+pays transcription time (tens of ms for short clips), not the model load. First toggle starts recording; second stops, transcribes, and types.
 
-- **Engine**: faster-whisper `large-v3-turbo` on CUDA (`float16`, English).
+- **Engine**: NVIDIA Parakeet TDT 0.6B v2 via [onnx-asr](https://github.com/istupakov/onnx-asr) on CUDA (English, punctuated).
 - **Injection**: `ydotool` (kernel uinput) — works in terminals, browsers, Electron, XWayland.
 - **Audio**: PipeWire `pw-record`.
 
@@ -63,11 +62,9 @@ Set in `~/.config/systemd/user/speakit.service` (`Environment=...`) or your shel
 
 | Var | Default | Notes |
 |-----|---------|-------|
-| `SPEAKIT_MODEL` | `large-v3-turbo` | any faster-whisper model (`large-v3`, `distil-large-v3`, ...) |
+| `SPEAKIT_MODEL` | `nemo-parakeet-tdt-0.6b-v2` | any onnx-asr model (`nemo-parakeet-tdt-0.6b-v3` for 25 languages, ...) |
 | `SPEAKIT_DEVICE` | `cuda` | `cpu` falls back automatically if CUDA fails |
-| `SPEAKIT_COMPUTE_TYPE` | `float16` | `int8_float16` to save VRAM |
-| `SPEAKIT_LANGUAGE` | `en` | force language (skips detection) |
-| `SPEAKIT_BEAM_SIZE` | `5` | lower = faster, slightly less accurate |
+| `SPEAKIT_QUANTIZATION` | (full precision) | `int8` = smaller, mainly for CPU |
 | `SPEAKIT_MIC` | (default source) | PipeWire source name/id; `pactl list short sources` |
 | `SPEAKIT_WAYBAR_SIGNAL` | `8` | must match `"signal"` in your waybar module |
 | `SPEAKIT_NOTIFY` | `1` | `0` disables desktop notifications |
@@ -95,5 +92,5 @@ The daemon pokes waybar (`SIGRTMIN+8`) on every state change for instant updates
   `systemctl --user status ydotoold`; confirm you're in the `input` group (`id`) and relogged.
 - **`daemon not running`** → `systemctl --user status speakit`; logs: `journalctl --user -u speakit -f`.
 - **Loaded on CPU (slow)** → check daemon log for the CUDA load error; ensure NVIDIA
-  driver present. faster-whisper pulls its own CUDA libs via pip; no system CUDA toolkit needed.
+  driver present. onnxruntime-gpu pulls its own CUDA 13 libs via pip (driver must support CUDA 13); no system CUDA toolkit needed.
 - **Wrong mic** → set `SPEAKIT_MIC` (see `pactl list short sources`).

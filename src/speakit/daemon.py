@@ -1,10 +1,10 @@
 """speakit daemon.
 
-Resident process: keeps the whisper model loaded in VRAM and runs a tiny
+Resident process: keeps the ASR model loaded in VRAM and runs a tiny
 unix-socket server. The toggle client sends "toggle"; first toggle starts
 recording, second stops -> transcribe -> type into the focused window.
 
-Model load (~3-5s) happens once at startup so each dictation only pays
+Model load (a few seconds) happens once at startup so each dictation only pays
 transcription time.
 """
 from __future__ import annotations
@@ -121,14 +121,7 @@ class Daemon:
     # --- transcribe + inject ----------------------------------------------
     def transcribe(self, wav: str) -> str:
         t0 = time.monotonic()
-        segments, _info = self.model.transcribe(
-            wav,
-            language=cfg.LANGUAGE,
-            beam_size=cfg.BEAM_SIZE,
-            vad_filter=True,
-            initial_prompt=cfg.INITIAL_PROMPT or None,
-        )
-        text = "".join(seg.text for seg in segments)
+        text = self.model.recognize(wav)
         if cfg.TRIM_OUTPUT:
             text = text.strip()
         log(f"transcribed in {time.monotonic() - t0:.2f}s: {text!r}")
@@ -191,26 +184,24 @@ class Daemon:
 
     # --- server ------------------------------------------------------------
     def run(self) -> None:
-        # Preload bundled CUDA libs (handles system CUDA major mismatch) before
-        # ctranslate2 (pulled in by faster_whisper) resolves its .so deps.
-        if cfg.DEVICE != "cpu":
-            from . import cuda as _cuda
-
-            if _cuda.preload():
-                log("preloaded CUDA libs from nvidia wheels")
-
-        # Load model first so we never accept a toggle before we can serve it.
-        from faster_whisper import WhisperModel
+        import numpy as np
+        import onnx_asr
+        import onnxruntime as ort
 
         def load_model() -> None:
-            log(f"loading model {cfg.MODEL} on {cfg.DEVICE} ({cfg.COMPUTE_TYPE})...")
+            log(f"loading model {cfg.MODEL} on {cfg.DEVICE}...")
             t0 = time.monotonic()
-            try:
-                self.model = WhisperModel(cfg.MODEL, device=cfg.DEVICE, compute_type=cfg.COMPUTE_TYPE)
-            except Exception as e:
-                log(f"model load failed on {cfg.DEVICE}: {e}")
-                log("falling back to CPU (int8)")
-                self.model = WhisperModel(cfg.MODEL, device="cpu", compute_type="int8")
+            providers: list = ["CPUExecutionProvider"]
+            if cfg.DEVICE != "cpu":
+                # CUDA/cuDNN come from the nvidia-* wheels, not the system.
+                ort.preload_dlls()
+                # HEURISTIC: the default exhaustive cuDNN search re-runs for
+                # every new clip length, making each first-seen length slow.
+                providers.insert(0, ("CUDAExecutionProvider", {"cudnn_conv_algo_search": "HEURISTIC"}))
+            # ORT falls back to CPU by itself if the CUDA provider can't start.
+            model = onnx_asr.load_model(cfg.MODEL, cfg.MODEL_DIR, quantization=cfg.QUANTIZATION or None, providers=providers)
+            model.recognize(np.zeros(cfg.SAMPLE_RATE, dtype=np.float32))  # warm up
+            self.model = model
             log(f"model loaded in {time.monotonic() - t0:.1f}s")
 
         # Open the socket FIRST so the client never sees "daemon not running"
