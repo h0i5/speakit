@@ -84,7 +84,7 @@ impl Glide {
 }
 
 
-/// Border/ring fade, like the web UI's 150 ms transition.
+/// Hover/focus fade, like the web UI's 150 ms transition.
 const RING_MS: u64 = 150;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -136,7 +136,7 @@ struct SettingsWindow {
     page_at: Instant,
     ticks: u32,
     subscriptions: Vec<Subscription>,
-    /// Border level per control (0 idle, 1 hover, 2 focus), eased between levels.
+    /// Hover/focus level per element (0 idle, 1 hover, 2 focus), eased between levels.
     rings: HashMap<SharedString, Glide>,
     hovered: std::collections::HashSet<SharedString>,
     /// Key-card easter egg: a tapped keycap latches like a recording.
@@ -389,9 +389,11 @@ impl SettingsWindow {
         })
     }
 
-    /// Eases each control's border towards focus (2), hover (1) or idle (0); true while any moves.
+    /// Eases every hover/focus level towards its target; true while any is moving.
     fn retarget(&mut self, now: Instant, window: &Window, cx: &App) -> bool {
-        let keys: Vec<SharedString> = self.inputs.keys().map(|k| SharedString::from(k.clone())).chain(self.hovered.iter().cloned()).collect();
+        // Every key with a level too: one that just lost hover must still fade back to 0.
+        let keys: Vec<SharedString> =
+            self.inputs.keys().map(|k| SharedString::from(k.clone())).chain(self.hovered.iter().cloned()).chain(self.rings.keys().cloned()).collect();
         for k in keys {
             let focused = self.inputs.get(k.as_ref()).is_some_and(|s| s.read(cx).focus_handle(cx).is_focused(window));
             let to = if focused { 2. } else if self.hovered.contains(&k) { 1. } else { 0. };
@@ -450,9 +452,11 @@ impl SettingsWindow {
                     (_, false) => dot(c.opacity(0.25)),
                 }
             });
+            let hk = SharedString::from(format!("cap-{i}"));
             let cap = keycap(key, sink)
+                .bg(vgrad(blend(n700(), n500(), 0.15 * self.ring(&hk, now)), n800()))
                 .id(("cap", i))
-                .hover(|s| s.bg(vgrad(blend(n700(), n500(), 0.15), n800())))
+                .on_hover(self.hover(hk, cx))
                 .active(|s| s.bg(vgrad(n700(), n800())).top(px(2.)).shadow(keycap_shadow(1.)))
                 .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| this.tap_key(i, window, cx)));
             card()
@@ -471,6 +475,25 @@ impl SettingsWindow {
             .child(text("Tap to start and tap again to stop, or hold while you talk. Rebind in hyprland.conf.", 12., 18., n600()).px(px(14.)))
     }
 
+    /// "Made by Harsh", bottom right; the name links to harshiyer.in.
+    fn credit(&self, now: Instant, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let t = self.ring("credit", now);
+        div()
+            .absolute()
+            .right(px(24.))
+            .bottom(px(12.))
+            .flex()
+            .gap(px(3.))
+            .child(text("Made by", 12., 16., n600()))
+            .child(
+                text("Harsh", 12., 16., blend(n500(), a400(), t))
+                    .id("credit")
+                    .cursor_pointer()
+                    .on_hover(self.hover("credit".into(), cx))
+                    .on_click(|_: &ClickEvent, _, cx| cx.open_url("https://harshiyer.in")),
+            )
+    }
+
     fn nav(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
         if i == self.page {
             return;
@@ -479,6 +502,8 @@ impl SettingsWindow {
         self.pill = Glide { from: self.pill.value(now, 260), to: i as f32 * 34.0, at: now };
         self.page_at = now;
         self.page = i;
+        // Elements on the old page never get their hover-out; keep only the sidebar's.
+        self.hovered.retain(|k| k.starts_with("nav-"));
         self.load_page(window, cx);
         cx.notify();
     }
@@ -486,6 +511,8 @@ impl SettingsWindow {
     fn sidebar(&self, now: Instant, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let items = PAGES.iter().enumerate().map(|(i, p)| {
             let on = i == self.page;
+            let key = SharedString::from(format!("nav-{i}"));
+            let t = if on { 0. } else { self.ring(&key, now) };
             div()
                 .id(("nav", i))
                 .h(px(32.))
@@ -496,8 +523,9 @@ impl SettingsWindow {
                 .rounded(px(6.))
                 .text_size(px(13.))
                 .line_height(px(19.5))
-                .text_color(if on { n50() } else { n500() })
-                .when(!on, |d| d.hover(|s| s.bg(n900().opacity(0.6)).text_color(n50())))
+                .text_color(if on { n50() } else { blend(n500(), n50(), t) })
+                .bg(n900().opacity(0.6 * t))
+                .on_hover(self.hover(key, cx))
                 .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| this.nav(i, window, cx)))
                 .child(icon(p.icon, 16., if on { a400() } else { n600() }))
                 .child(p.label)
@@ -574,7 +602,7 @@ impl SettingsWindow {
                 .bg(a950())
                 .shadow(vec![shadow(0., 0., 0., 1., a800(), false)])
                 .child(text("Restart speakit to use the new model settings.", 14., 20., a200()))
-                .child(primary_button("restart", Some("restart"), "Restart").on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                .child(primary_button("restart", Some("restart"), "Restart", self.ring("restart", now)).on_hover(self.hover("restart".into(), cx)).on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                     this.needs_restart = false;
                     this.notify("Restarting speakit", None, Tone::Neutral, 2500, window, cx);
                     this.request("POST", "restart", None, window, cx, |_, _: Result<Value, String>, _, _| {});
@@ -689,10 +717,14 @@ impl SettingsWindow {
                 div()
                     .flex()
                     .gap(px(2.))
-                    .child(stepper(SharedString::from(format!("minus-{name}")), "minus", minus).when(minus, |d| {
+                    .child(stepper(SharedString::from(format!("minus-{name}")), "minus", minus, self.ring(&format!("minus-{name}"), Instant::now())).when(minus, |d| {
+                        d.on_hover(self.hover(format!("minus-{name}").into(), cx))
+                    }).when(minus, |d| {
                         d.on_click(cx.listener(move |this, _: &ClickEvent, window, cx| this.step(&n1, -step, window, cx)))
                     }))
-                    .child(stepper(SharedString::from(format!("plus-{name}")), "plus", plus).when(plus, |d| {
+                    .child(stepper(SharedString::from(format!("plus-{name}")), "plus", plus, self.ring(&format!("plus-{name}"), Instant::now())).when(plus, |d| {
+                        d.on_hover(self.hover(format!("plus-{name}").into(), cx))
+                    }).when(plus, |d| {
                         d.on_click(cx.listener(move |this, _: &ClickEvent, window, cx| this.step(&n2, step, window, cx)))
                     })),
             )
@@ -709,7 +741,7 @@ impl SettingsWindow {
             run(code.len(), mono, n500()),
             run(tail.len(), FONT.into(), n600()),
         ]);
-        let save = primary_button("save-words", None, "Save word fixes").on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+        let save = primary_button("save-words", None, "Save word fixes", self.ring("save-words", Instant::now())).on_hover(self.hover("save-words".into(), cx)).on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
             let Some(words) = &this.words else { return };
             let text = words.read(cx).value().to_string();
             this.request("PUT", "replacements", Some(json!({ "text": text })), window, cx, |this, r: Result<Value, String>, window, cx| match r {
@@ -753,14 +785,16 @@ impl SettingsWindow {
                 .child(clock(h.time));
             let copied = h.text.clone();
             let ck = SharedString::from(format!("copy-{i}"));
-            let copy = icon_button(("copy", i), "copy", self.ring(&ck, Instant::now())).on_hover(self.hover(ck, cx)).opacity(0.).group_hover("history-row", |s| s.opacity(1.)).on_click(cx.listener(
+            let rk = SharedString::from(format!("row-{i}"));
+            let copy = icon_button(("copy", i), "copy", self.ring(&ck, Instant::now())).on_hover(self.hover(ck, cx)).opacity(self.ring(&rk, Instant::now())).on_click(cx.listener(
                 move |this, _: &ClickEvent, window, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(copied.clone()));
                     this.notify("Copied", None, Tone::Neutral, 1200, window, cx);
                 },
             ));
             div()
-                .group("history-row")
+                .id(("row", i))
+                .on_hover(self.hover(rk, cx))
                 .flex()
                 .items_start()
                 .gap(px(16.))
@@ -818,7 +852,8 @@ impl SettingsWindow {
                     .items_center()
                     .justify_center()
                     .rounded(px(6.))
-                    .hover(|s| s.bg(n700()))
+                    .bg(n700().opacity(self.ring("toast-close", now)))
+                    .on_hover(self.hover("toast-close".into(), cx))
                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                         this.toast = None;
                         cx.notify();
@@ -852,7 +887,7 @@ impl Render for SettingsWindow {
             window.request_animation_frame();
         }
         let toast = self.toast.as_ref().map(|t| self.toast(t, now, cx));
-        root.child(self.sidebar(now, cx)).child(self.content(now, window, cx)).children(toast)
+        root.child(self.sidebar(now, cx)).child(self.content(now, window, cx)).child(self.credit(now, cx)).children(toast)
     }
 }
 

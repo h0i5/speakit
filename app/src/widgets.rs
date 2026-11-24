@@ -25,7 +25,7 @@ pub fn vgrad(top: Hsla, bottom: Hsla) -> gpui::Background {
     linear_gradient(180., linear_color_stop(top, 0.), linear_color_stop(bottom, 1.))
 }
 
-/// Linear blend of two colours (eased hover/focus borders).
+/// Linear blend of two colours (eased hover/focus states).
 pub fn blend(a: Hsla, b: Hsla, t: f32) -> Hsla {
     let l = |x: f32, y: f32| x + (y - x) * t;
     Hsla { h: l(a.h, b.h), s: l(a.s, b.s), l: l(a.l, b.l), a: l(a.a, b.a) }
@@ -146,7 +146,7 @@ pub fn icon_button(id: impl Into<ElementId>, ic: &str, t: f32) -> Stateful<Div> 
 }
 
 /// Primary small button: 32px tall, amber gradient, 14px medium label, optional 18px icon.
-pub fn primary_button(id: impl Into<ElementId>, ic: Option<&str>, label: &'static str) -> Stateful<Div> {
+pub fn primary_button(id: impl Into<ElementId>, ic: Option<&str>, label: &'static str, t: f32) -> Stateful<Div> {
     div()
         .id(id)
         .h(px(32.))
@@ -155,15 +155,14 @@ pub fn primary_button(id: impl Into<ElementId>, ic: Option<&str>, label: &'stati
         .items_center()
         .gap(px(4.))
         .rounded(px(8.))
-        .bg(vgrad(a500(), a600()))
+        .bg(vgrad(blend(a500(), a400(), t), blend(a600(), a500(), t)))
         .shadow(vec![shadow(0., 1., 2., 0., black(0.18), false)])
-        .hover(|s| s.bg(vgrad(a400(), a500())))
         .children(ic.map(|i| icon(i, 18., on_accent())))
         .child(text(label, 14., 20., on_accent()).font_weight(FontWeight::MEDIUM))
 }
 
 /// Number field minus/plus.
-pub fn stepper(id: impl Into<ElementId>, ic: &str, enabled: bool) -> Stateful<Div> {
+pub fn stepper(id: impl Into<ElementId>, ic: &str, enabled: bool, t: f32) -> Stateful<Div> {
     div()
         .id(id)
         .size(px(24.))
@@ -171,7 +170,7 @@ pub fn stepper(id: impl Into<ElementId>, ic: &str, enabled: bool) -> Stateful<Di
         .items_center()
         .justify_center()
         .rounded(px(6.))
-        .when(enabled, |d| d.hover(|s| s.bg(n700())))
+        .when(enabled, |d| d.bg(n700().opacity(t)))
         .child(icon(ic, 16., if enabled { n500() } else { n500().opacity(0.4) }))
 }
 
