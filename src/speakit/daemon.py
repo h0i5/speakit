@@ -26,6 +26,8 @@ IDLE = "idle"
 RECORDING = "recording"
 # Display-only: recording with the LLM cleanup pass armed (clean key held).
 RECORDING_POLISH = "recording-polish"
+# Display-only: between stop and typing (transcribe + optional cleanup).
+PROCESSING = "processing"
 # Transient display-only state shown after a successful type (the ✓ tick).
 DONE = "done"
 
@@ -119,9 +121,10 @@ class Daemon:
         """Stop recorder cleanly and return the WAV path (empty on failure)."""
         proc, self.rec_proc = self.rec_proc, None
         self.state = IDLE
-        set_state(IDLE)
         if proc is None:
+            set_state(IDLE)
             return ""
+        set_state(PROCESSING)  # toggle() ends it with flash_done() or IDLE
         # SIGINT lets pw-record flush/close the WAV header cleanly.
         proc.send_signal(signal.SIGINT)
         try:
@@ -179,11 +182,13 @@ class Daemon:
         # RECORDING -> stop + process
         wav = self.stop_recording()
         if not wav:
+            set_state(IDLE)
             notify("speakit", "no audio captured")
             return "empty"
         try:
             text = self.transcribe(wav)
         except Exception as e:  # never let one bad clip kill the daemon
+            set_state(IDLE)
             notify("speakit error", f"transcribe failed: {e}", urgency="critical")
             log(f"transcribe error: {e}")
             return "error"
@@ -192,6 +197,7 @@ class Daemon:
             text = replace(clean(polish(text)), load_replacements(cfg.REPLACEMENTS_PATH))
             log(f"polished in {time.monotonic() - t0:.2f}s: {text!r}")
         if not text:
+            set_state(IDLE)
             notify("speakit", "no speech detected")
             return "empty"
         self.inject(text)

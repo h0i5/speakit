@@ -110,7 +110,45 @@ S D F S => SDFs
 ```
 
 ```css
-#custom-speakit.recording { color: #ff5555; }
+/* speakit: house tint (text colour + faint background, border neutral).
+   The record dot is the only span without a Pango colour, so it follows
+   `color`, which the animation flips: only the dot blinks. REC+ (cleanup
+   armed) is violet. Hidden when idle (empty text collapses the module). */
+#custom-speakit.recording {
+  color: #ff5555;
+  background-color: #2a1519;
+  animation: speakit-blink-red 1.2s infinite;
+}
+
+#custom-speakit.recording.polish {
+  color: #bd93f9;
+  background-color: #1f1a2b;
+  animation-name: speakit-blink-violet;
+}
+
+#custom-speakit.processing {
+  color: #e5a04b;
+  background-color: #251e14;
+}
+
+#custom-speakit.done {
+  color: #50fa7b;
+  background-color: #16241c;
+}
+
+@keyframes speakit-blink-red {
+  0% { color: #ff5555; }
+  50% { color: #ff5555; }
+  51% { color: #4a2026; }
+  100% { color: #4a2026; }
+}
+
+@keyframes speakit-blink-violet {
+  0% { color: #bd93f9; }
+  50% { color: #bd93f9; }
+  51% { color: #3a2d52; }
+  100% { color: #3a2d52; }
+}
 ```
 
 The daemon pokes waybar (`SIGRTMIN+8`) on every state change for instant updates.
