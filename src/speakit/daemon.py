@@ -18,14 +18,17 @@ import threading
 import time
 
 from . import config as cfg
-from .polish import polish
-from .text import clean, load_replacements, replace
+from . import desktop as dk
+from .polish import app_style, command, polish
+from .text import ascii_fold, clean, load_replacements, replace
 
 # Logic states.
 IDLE = "idle"
 RECORDING = "recording"
-# Display-only: recording with the LLM cleanup pass armed (clean key held).
+# Display-only: recording with the LLM cleanup pass armed (clean key).
 RECORDING_POLISH = "recording-polish"
+# Display-only: recording a spoken instruction for command mode (command key).
+RECORDING_COMMAND = "recording-command"
 # Display-only: between stop and typing (transcribe + optional cleanup).
 PROCESSING = "processing"
 # Transient display-only state shown after a successful type (the ✓ tick).
@@ -66,8 +69,11 @@ class Daemon:
         self.model = None  # lazy import + load in run()
         # Monotonic generation so a stale "done" timer can't clear a newer state.
         self._display_gen = 0
-        # LLM cleanup armed for the current recording (started via the clean key).
-        self.polish = False
+        # What happens to the current recording: "raw" (type as-is), "clean"
+        # (LLM cleanup) or "command" (instruction applied to the selection).
+        self.mode = "raw"
+        self.paused: list[str] = []  # media players we paused, to resume
+        self.cues = dk.make_cues(cfg.RUNTIME_DIR) if cfg.SOUNDS else None
         # Socket handler and the auto-stop timer thread both drive state.
         self.lock = threading.Lock()
 
@@ -95,6 +101,8 @@ class Daemon:
         if cfg.MIC_TARGET:
             cmd += ["--target", cfg.MIC_TARGET]
         cmd.append(str(cfg.WAV_PATH))
+        if cfg.PAUSE_MEDIA:
+            self.paused = dk.pause_media()
         try:
             self.rec_proc = subprocess.Popen(cmd)
         except FileNotFoundError:
@@ -104,7 +112,9 @@ class Daemon:
         self.rec_started = started = time.monotonic()
         self.state = RECORDING
         self._display_gen += 1  # invalidate any pending done-tick timer
-        set_state(RECORDING_POLISH if self.polish else RECORDING)
+        set_state({"clean": RECORDING_POLISH, "command": RECORDING_COMMAND}.get(self.mode, RECORDING))
+        if self.cues:
+            dk.play(cfg.SOUND_START or self.cues[0])
 
         def auto_stop() -> None:
             if self.state == RECORDING and self.rec_started == started:
@@ -132,6 +142,10 @@ class Daemon:
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+        if self.cues:
+            dk.play(cfg.SOUND_STOP or self.cues[1])
+        dk.resume_media(self.paused)
+        self.paused = []
         dur = time.monotonic() - self.rec_started
         log(f"recording stopped ({dur:.1f}s)")
         if not cfg.WAV_PATH.exists() or cfg.WAV_PATH.stat().st_size < 1024:
@@ -147,9 +161,16 @@ class Daemon:
         log(f"transcribed in {time.monotonic() - t0:.2f}s: {text!r}")
         return text
 
-    def inject(self, text: str) -> None:
+    def inject(self, text: str, terminal: bool, trailing: str = " ") -> None:
         # Trailing space so back-to-back dictations don't run together.
-        lines = (text + " ").split("\n")
+        text += trailing
+        if len(text) >= cfg.PASTE_MIN_CHARS or not text.isascii():
+            # Long text: one paste beats typing key by key (also keeps
+            # newlines as newlines; pasting never triggers "send").
+            # Non-ASCII (accents, other scripts): ydotool can't type it.
+            dk.paste(text, terminal)
+            return
+        lines = ascii_fold(text).split("\n")
         try:
             for i, line in enumerate(lines):
                 if i:
@@ -192,15 +213,27 @@ class Daemon:
             notify("speakit error", f"transcribe failed: {e}", urgency="critical")
             log(f"transcribe error: {e}")
             return "error"
-        if text and self.polish:
+        cls, title = dk.active_window()
+        terminal = dk.is_terminal(cls)
+        style = app_style(cls, title, terminal)
+        trailing = " "
+        if text and self.mode == "clean":
             t0 = time.monotonic()
-            text = replace(clean(polish(text)), load_replacements(cfg.REPLACEMENTS_PATH))
-            log(f"polished in {time.monotonic() - t0:.2f}s: {text!r}")
+            text = replace(clean(polish(text, style)), load_replacements(cfg.REPLACEMENTS_PATH))
+            log(f"polished in {time.monotonic() - t0:.2f}s [{cls}]: {text!r}")
+        elif text and self.mode == "command":
+            # Read the selection now, not at key press: synthetic copy keys
+            # between press and release would make Hyprland drop the release.
+            selection = dk.copy_selection(terminal)
+            t0 = time.monotonic()
+            text = clean(command(text, selection, style))
+            log(f"command in {time.monotonic() - t0:.2f}s [{cls}, {len(selection)} chars selected]: {text!r}")
+            trailing = "" if selection else " "  # replacing a selection: no extra space
         if not text:
             set_state(IDLE)
             notify("speakit", "no speech detected")
             return "empty"
-        self.inject(text)
+        self.inject(text, terminal, trailing)
         notify("✓ Transcription done")
         self.flash_done()
         return "typed"
@@ -215,13 +248,15 @@ class Daemon:
         if cmd == "status":
             return self.state
         if cmd == "press":
-            self.polish = self.polish and self.state == RECORDING
+            if self.state != RECORDING:  # stopping keeps the recording's mode
+                self.mode = "raw"
             return self.toggle()
-        if cmd == "press-clean":
-            # Clean key: starts a cleanup recording, or stops any recording
-            # with cleanup. Its own key (not a chord with the dictation key):
-            # Hyprland drops release binds when two keys are let go together.
-            self.polish = True
+        if cmd in ("press-clean", "press-command"):
+            # Clean/command keys: start a recording in that mode, or stop any
+            # recording in that mode. Separate keys, not chords with the
+            # dictation key: Hyprland drops release binds when two keys are
+            # let go together.
+            self.mode = "clean" if cmd == "press-clean" else "command"
             return self.toggle()
         if cmd == "release":
             # Tap = toggle mode, keep recording. Hold = push-to-talk, stop now.

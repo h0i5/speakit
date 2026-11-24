@@ -18,6 +18,8 @@ command -v ydotool   >/dev/null || need_pkgs+=(ydotool)
 command -v pw-record >/dev/null || need_pkgs+=(pipewire)
 command -v notify-send >/dev/null || need_pkgs+=(libnotify)
 command -v llama-server >/dev/null || need_pkgs+=(llama-cpp ggml-vulkan)
+command -v wl-copy     >/dev/null || need_pkgs+=(wl-clipboard)
+command -v playerctl   >/dev/null || need_pkgs+=(playerctl)
 if [ ${#need_pkgs[@]} -gt 0 ]; then
     sudo pacman -S --needed "${need_pkgs[@]}"
 else
@@ -86,6 +88,11 @@ cat <<EOF
 
    Tap = toggle (tap again to stop). Hold = push-to-talk (release to stop).
    Insert works the same, plus LLM cleanup + formatting.
+
+   bind  = , End, exec, $PROJECT_DIR/.venv/bin/speakit-toggle press-command
+   bindr = , End, exec, $PROJECT_DIR/.venv/bin/speakit-toggle release
+
+   End = command mode: select text, say what to do with it.
 
    (services autostart via systemd; no exec-once needed)
 

@@ -72,6 +72,16 @@ REPLACEMENTS_PATH = Path(
 LLM_URL = os.environ.get("SPEAKIT_LLM_URL", "http://127.0.0.1:8765/v1/chat/completions")
 LLM_TIMEOUT = float(os.environ.get("SPEAKIT_LLM_TIMEOUT", "8"))
 
+# --- Desktop -------------------------------------------------------------------
+# Pause playing media (MPRIS: Spotify, browsers, mpv...) while recording.
+PAUSE_MEDIA = os.environ.get("SPEAKIT_PAUSE_MEDIA", "1") != "0"
+# Start/stop cue sounds. Built-in soft blips unless a file path is given.
+SOUNDS = os.environ.get("SPEAKIT_SOUNDS", "1") != "0"
+SOUND_START = os.environ.get("SPEAKIT_SOUND_START", "")
+SOUND_STOP = os.environ.get("SPEAKIT_SOUND_STOP", "")
+# Text at least this long is pasted (clipboard restored after) instead of typed.
+PASTE_MIN_CHARS = int(os.environ.get("SPEAKIT_PASTE_MIN_CHARS", "150"))
+
 # Auto-stop (and transcribe) a recording left running this long.
 MAX_RECORD_SECONDS = float(os.environ.get("SPEAKIT_MAX_RECORD_SECONDS", "120"))
 

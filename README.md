@@ -57,6 +57,17 @@ bindr = SUPER, D, exec, ~/Desktop/web/speakit/.venv/bin/speakit-toggle release
   running dictation) → cleanup mode: a local LLM fixes grammar, drops false starts, applies
   self-corrections ("3, no, 4" → "4") and formats lists/paragraphs. Waybar shows
   `REC+`. Line breaks are typed as Shift+Enter so chat apps don't send early.
+- **End** (command mode, tap or hold) → select text, then say what to do with it
+  ("make this more polite", "turn into bullets", "translate to Hindi"); the result
+  replaces the selection. Nothing selected = writes what you ask for ("write a
+  short reply saying I'll be 10 minutes late"). Waybar shows a gold wand.
+- Cleanup and command mode adapt to the focused app: terminals get backticked
+  commands/paths, chat apps a casual tone, email (Gmail, Thunderbird...) polished paragraphs.
+- Playing media (Spotify, browser, mpv...) pauses while recording and resumes after.
+- Soft start/stop blips (`SPEAKIT_SOUNDS=0` to disable, or point
+  `SPEAKIT_SOUND_START`/`_STOP` at your own files).
+- Text of 150+ chars or with non-ASCII characters is pasted (clipboard restored)
+  instead of typed key by key; terminals get Ctrl+Shift+V.
 - Recordings auto-stop after `SPEAKIT_MAX_RECORD_SECONDS` (120).
 
 CLI equivalents (for testing without the keybind):
@@ -79,6 +90,9 @@ Set in `~/.config/systemd/user/speakit.service` (`Environment=...`) or your shel
 | `SPEAKIT_MIC` | (default source) | PipeWire source name/id; `pactl list short sources` |
 | `SPEAKIT_WAYBAR_SIGNAL` | `8` | must match `"signal"` in your waybar module |
 | `SPEAKIT_NOTIFY` | `0` | `1` enables desktop notifications |
+| `SPEAKIT_PAUSE_MEDIA` | `1` | pause MPRIS players while recording |
+| `SPEAKIT_SOUNDS` | `1` | start/stop cue sounds |
+| `SPEAKIT_PASTE_MIN_CHARS` | `150` | paste instead of type at this length |
 | `SPEAKIT_LLM_URL` | `http://127.0.0.1:8765/v1/chat/completions` | any OpenAI-compatible endpoint |
 | `SPEAKIT_LLM_TIMEOUT` | `8` | seconds before falling back to raw text |
 | `SPEAKIT_MAX_RECORD_SECONDS` | `120` | auto-stop |
