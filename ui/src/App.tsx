@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import {
   RiBookOpenLine, RiCpuLine, RiFileCopyLine, RiHistoryLine, RiKeyboardBoxLine, RiMicLine,
   RiRestartLine, RiSettings3Line, RiSparkling2Line, RiVolumeUpLine,
 } from "@remixicon/react";
-import { Tab, TabList, TabPanel, Tabs } from "react-aria-components";
+import { Tab, TabList, TabPanel, Tabs, type Key } from "react-aria-components";
 import { Button } from "@/components/base/buttons/button";
 import { Input } from "@/components/base/input/input";
 import { NumberField } from "@/components/base/number-field/number-field";
@@ -188,6 +188,19 @@ export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState("");
   const [needsRestart, setNeedsRestart] = useState(false);
+  const [page, setPage] = useState<Key>(new URLSearchParams(location.search).get("tab") ?? "general");
+  const [pillY, setPillY] = useState(0);
+  const nav = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // react-aria renders the tab collection a pass later, so measure next frame.
+    const f = requestAnimationFrame(() => {
+      const tab = nav.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+      if (tab) setPillY(tab.offsetTop);
+    });
+    scroller.current?.scrollTo({ top: 0 });
+    return () => cancelAnimationFrame(f);
+  }, [page, settings]);
 
   useEffect(() => {
     api<Settings>("settings").then(setSettings).catch((e) => setError(e.message));
@@ -233,9 +246,8 @@ export default function App() {
     </Group>
   );
 
-  const initial = new URLSearchParams(location.search).get("tab") ?? "general";
   return (
-    <Tabs orientation="vertical" defaultSelectedKey={initial} className="grid h-screen grid-cols-[228px_1fr]">
+    <Tabs orientation="vertical" selectedKey={page} onSelectionChange={setPage} className="grid h-screen grid-cols-[228px_1fr]">
       <aside className="flex flex-col border-r border-black/40 bg-neutral-950 px-3 py-5">
         <div className="mb-6 flex items-center gap-3 px-2">
           <div className="grid size-8 place-items-center rounded-[9px] bg-linear-to-b from-accent-400 to-accent-600 text-(--on-accent) shadow-[inset_0_1px_0_rgb(255_255_255/0.25),inset_0_-2px_0_rgb(0_0_0/0.2)]">
@@ -243,17 +255,22 @@ export default function App() {
           </div>
           <div className="text-[15px] font-semibold tracking-[-0.01em] text-text-primary">speakit</div>
         </div>
-        <TabList aria-label="Settings" className="flex flex-col gap-0.5">
-          {PAGES.map(({ id, label, icon: I }) => (
-            <Tab key={id} id={id} className={({ isSelected, isFocusVisible }) => cx(
-              "flex h-9 cursor-default items-center gap-2.5 rounded-lg px-2.5 text-sm outline-none transition-colors duration-150",
-              isSelected ? "bg-neutral-800 text-text-primary shadow-[inset_0_1px_0_rgb(255_255_255/0.04)]" : "text-text-secondary hover:bg-neutral-900 hover:text-text-primary",
-              isFocusVisible && "ring-2 ring-accent-500",
-            )}>
-              {({ isSelected }) => <><I className={cx("size-4", isSelected ? "text-accent-400" : "text-text-tertiary")} />{label}</>}
-            </Tab>
-          ))}
-        </TabList>
+        <div ref={nav} className="relative">
+          {/* One highlight that glides to the selected item (transform only, so it can be retargeted mid-move). */}
+          <div aria-hidden className="nav-pill absolute inset-x-0 top-0 h-9 rounded-lg bg-neutral-800 shadow-[inset_0_1px_0_rgb(255_255_255/0.04)]"
+            style={{ transform: `translateY(${pillY}px)` }} />
+          <TabList aria-label="Settings" className="relative flex flex-col gap-0.5">
+            {PAGES.map(({ id, label, icon: I }) => (
+              <Tab key={id} id={id} className={({ isSelected, isFocusVisible }) => cx(
+                "flex h-9 cursor-default items-center gap-2.5 rounded-lg px-2.5 text-sm outline-none transition-[color,background-color] duration-150 active:scale-[0.98]",
+                isSelected ? "text-text-primary" : "text-text-secondary hover:bg-neutral-900/60 hover:text-text-primary",
+                isFocusVisible && "ring-2 ring-accent-500",
+              )}>
+                {({ isSelected }) => <><I className={cx("size-4 transition-colors duration-200", isSelected ? "text-accent-400" : "text-text-tertiary")} />{label}</>}
+              </Tab>
+            ))}
+          </TabList>
+        </div>
         <div className="mt-auto space-y-2 px-2.5">
           {status ? (
             <>
@@ -265,9 +282,9 @@ export default function App() {
         </div>
       </aside>
 
-      <div className="overflow-y-auto">
+      <div ref={scroller} className="overflow-y-auto">
         {PAGES.map((p) => (
-          <TabPanel key={p.id} id={p.id} className="mx-auto max-w-[680px] px-10 pt-10 pb-16 outline-none">
+          <TabPanel key={p.id} id={p.id} className="page mx-auto max-w-[680px] px-10 pt-10 pb-16 outline-none">
             <header className="mb-7">
               <h1 className="text-[26px] leading-tight font-semibold tracking-[-0.02em] text-text-primary">{p.title}</h1>
               <p className="mt-1 text-sm text-text-secondary">{p.blurb}</p>
@@ -279,7 +296,7 @@ export default function App() {
                   .then(() => { setNeedsRestart(false); toast("Restarting speakit", { duration: 2500 }); })}>Restart</Button>
               </div>
             )}
-            <div className="space-y-7">
+            <div className="page-body space-y-7">
               {p.id === "general" && <Keys />}
               {p.sections.map(section)}
               {p.id === "cleanup" && (
