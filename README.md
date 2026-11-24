@@ -53,8 +53,8 @@ bindr = SUPER, D, exec, ~/Desktop/web/speakit/.venv/bin/speakit-toggle release
 - **Tap** SUPER+D → recording starts; **tap** again → transcribes and types at the cursor.
 - **Hold** SUPER+D while speaking → stops and types on release (push-to-talk).
   A press shorter than `SPEAKIT_HOLD_SECONDS` (0.4) counts as a tap.
-- **Insert + SUPER+D** (hold Insert when starting, or tap it mid-recording) →
-  cleanup mode: a local LLM fixes grammar, drops false starts, applies
+- **Insert** (tap or hold, same as the dictation key; or press it to stop a
+  running dictation) → cleanup mode: a local LLM fixes grammar, drops false starts, applies
   self-corrections ("3, no, 4" → "4") and formats lists/paragraphs. Waybar shows
   `REC+`. Line breaks are typed as Shift+Enter so chat apps don't send early.
 - Recordings auto-stop after `SPEAKIT_MAX_RECORD_SECONDS` (120).

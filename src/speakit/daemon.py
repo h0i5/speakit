@@ -64,8 +64,7 @@ class Daemon:
         self.model = None  # lazy import + load in run()
         # Monotonic generation so a stale "done" timer can't clear a newer state.
         self._display_gen = 0
-        # Clean key (Insert) held right now / armed for the current recording.
-        self.clean_held = False
+        # LLM cleanup armed for the current recording (started via the clean key).
         self.polish = False
         # Socket handler and the auto-stop timer thread both drive state.
         self.lock = threading.Lock()
@@ -102,7 +101,6 @@ class Daemon:
             return
         self.rec_started = started = time.monotonic()
         self.state = RECORDING
-        self.polish = self.clean_held
         self._display_gen += 1  # invalidate any pending done-tick timer
         set_state(RECORDING_POLISH if self.polish else RECORDING)
 
@@ -121,9 +119,6 @@ class Daemon:
         """Stop recorder cleanly and return the WAV path (empty on failure)."""
         proc, self.rec_proc = self.rec_proc, None
         self.state = IDLE
-        # Hyprland drops the clean key's release bind if Home was pressed
-        # while it was held, so each recording consumes the armed flag.
-        self.clean_held = False
         set_state(IDLE)
         if proc is None:
             return ""
@@ -214,22 +209,19 @@ class Daemon:
         if cmd == "status":
             return self.state
         if cmd == "press":
+            self.polish = self.polish and self.state == RECORDING
+            return self.toggle()
+        if cmd == "press-clean":
+            # Clean key: starts a cleanup recording, or stops any recording
+            # with cleanup. Its own key (not a chord with the dictation key):
+            # Hyprland drops release binds when two keys are let go together.
+            self.polish = True
             return self.toggle()
         if cmd == "release":
             # Tap = toggle mode, keep recording. Hold = push-to-talk, stop now.
             # (Release after a stopping tap finds state IDLE and does nothing.)
             if self.state == RECORDING and time.monotonic() - self.rec_started >= cfg.HOLD_SECONDS:
                 return self.toggle()
-            return self.state
-        if cmd == "clean-down":
-            # Hold the clean key before or during a recording to arm cleanup.
-            self.clean_held = True
-            if self.state == RECORDING and not self.polish:
-                self.polish = True
-                set_state(RECORDING_POLISH)
-            return self.state
-        if cmd == "clean-up":
-            self.clean_held = False
             return self.state
         if cmd == "stop" and self.state == RECORDING:
             return self.toggle()

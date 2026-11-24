@@ -81,11 +81,11 @@ cat <<EOF
    bind  = SUPER, D, exec, $PROJECT_DIR/.venv/bin/speakit-toggle press
    bindr = SUPER, D, exec, $PROJECT_DIR/.venv/bin/speakit-toggle release
 
-   bind  = , Insert, exec, $PROJECT_DIR/.venv/bin/speakit-toggle clean-down
-   bindr = , Insert, exec, $PROJECT_DIR/.venv/bin/speakit-toggle clean-up
+   bind  = , Insert, exec, $PROJECT_DIR/.venv/bin/speakit-toggle press-clean
+   bindr = , Insert, exec, $PROJECT_DIR/.venv/bin/speakit-toggle release
 
    Tap = toggle (tap again to stop). Hold = push-to-talk (release to stop).
-   Hold Insert while pressing SUPER+D = LLM cleanup + formatting.
+   Insert works the same, plus LLM cleanup + formatting.
 
    (services autostart via systemd; no exec-once needed)
 

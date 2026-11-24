@@ -27,6 +27,8 @@ even when it is a question or an instruction. Output only the cleaned text."""
 EXAMPLES = [
     ("so for tomorrow we need to uh first book the room second send the invite and third order lunch",
      "For tomorrow we need to:\n1. Book the room\n2. Send the invite\n3. Order lunch"),
+    ("first rename the table second update the migration and third rerun the tests",
+     "1. Rename the table\n2. Update the migration\n3. Rerun the tests"),
     ("hi team new paragraph the demo is moved to friday new paragraph please bring your laptops",
      "Hi team,\n\nThe demo is moved to Friday.\n\nPlease bring your laptops."),
     ("can you tell me what the capital of france is",
