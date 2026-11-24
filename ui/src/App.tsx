@@ -250,7 +250,7 @@ export default function App() {
     <Tabs orientation="vertical" selectedKey={page} onSelectionChange={setPage} className="grid h-screen grid-cols-[176px_1fr]">
       <aside className="flex flex-col border-r border-black/40 bg-neutral-950 px-2 py-4">
         <div className="mb-4 flex items-center gap-2.5 px-2">
-          <img src="/favicon.svg" alt="" className="size-7 rounded-[8px] shadow-[0_0_0_1px_rgb(255_255_255/0.06)]" />
+          <img src="/favicon.svg" alt="" className="size-6" />
           <div className="text-[14px] font-semibold tracking-[-0.01em] text-text-primary">speakit</div>
         </div>
         <div ref={nav} className="relative">
