@@ -63,6 +63,13 @@ say "Building the keybind client (Rust, ~1 ms per key press)..."
 ( cd "$PROJECT_DIR/client" && cargo build --release )
 install -Dm755 "$PROJECT_DIR/client/target/release/speakit-toggle" "$HOME/.local/bin/speakit-toggle"
 
+say "Building the native settings app (Rust/gpui, first build takes a few minutes)..."
+if ( cd "$PROJECT_DIR/app" && cargo build --release ); then
+    install -Dm755 "$PROJECT_DIR/app/target/release/speakit" "$HOME/.local/bin/speakit"
+else
+    warn "native settings app build failed: settings open in the web UI instead"
+fi
+
 say "Building the settings UI (pnpm)..."
 if command -v pnpm >/dev/null; then
     ( cd "$PROJECT_DIR/ui" && pnpm install --frozen-lockfile && pnpm build ) || warn "settings UI build failed"
@@ -70,7 +77,7 @@ else
     warn "pnpm not found: settings UI not built (dictation works without it)"
 fi
 install -Dm644 "$PROJECT_DIR/assets/speakit.svg" "$HOME/.local/share/icons/hicolor/scalable/apps/speakit.svg"
-sed "s|@PROJECT_DIR@|$PROJECT_DIR|" "$PROJECT_DIR/systemd/speakit-settings.desktop" \
+sed "s|@HOME@|$HOME|" "$PROJECT_DIR/systemd/speakit-settings.desktop" \
     > "$HOME/.local/share/applications/speakit-settings.desktop"
 
 # 4. systemd user units ----------------------------------------------------

@@ -55,3 +55,4 @@ CLAUDE.local.md
 .DS_Store
 Thumbs.db
 client/target
+app/target

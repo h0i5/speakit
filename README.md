@@ -83,12 +83,17 @@ uv run speakit-toggle status   # idle | recording
 
 `speakit-toggle settings` (or "speakit settings" in your app launcher) opens a
 settings window: keys, recording, typing, cleanup, word fixes, recent
-dictations and the speech model. It's a small React app (`ui/`, BoardUI
-components) served by the daemon on `127.0.0.1:8766`; the API needs a random
-per-start token that only the launcher can read. Changes save to
-`~/.config/speakit/config.toml` and apply live, except those marked *restart*.
+dictations and the speech model. It's a native Rust app (`app/`, gpui +
+gpui-component, installed as `~/.local/bin/speakit`) talking to the daemon's
+JSON API on `127.0.0.1:8766`; the API needs a random per-start token that only
+your user can read. Changes save to `~/.config/speakit/config.toml` and apply
+live, except those marked *restart*.
 
-Rebuild after editing `ui/`: `cd ui && pnpm install && pnpm build`.
+If the native app isn't installed, the launcher falls back to the React web UI
+(`ui/`, served by the daemon) in a Chrome app window.
+
+Rebuild after editing: `cd app && cargo build --release && install -m755 target/release/speakit ~/.local/bin/`
+(web UI: `cd ui && pnpm install && pnpm build`).
 
 ## Config (env vars)
 

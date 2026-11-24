@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
-Name=speakit settings
+Name=speakit
 Comment=Voice-to-text settings
-Exec=@PROJECT_DIR@/.venv/bin/speakit-toggle settings
+Exec=@HOME@/.local/bin/speakit-toggle settings
 Icon=speakit
 Categories=Settings;Utility;
