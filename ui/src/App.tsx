@@ -35,7 +35,7 @@ function Group({ title, action, children }: { title?: string; action?: ReactNode
   return (
     <section>
       {(title || action) && (
-        <div className="mb-1.5 flex h-6 items-end justify-between px-3.5">
+        <div className="mb-1.5 flex h-7 items-end justify-between ps-3.5">
           <h2 className="text-[12px] font-medium text-text-secondary">{title}</h2>
           {action}
         </div>
