@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from pathlib import Path
 
 # Parakeet transcribes hesitations verbatim ("message uh aligns"). Drop them,
@@ -10,6 +11,9 @@ _FILLER = re.compile(r",?\s*\b(?:uh+|um+|uhm|erm|hmm+|mm+)\b,?", re.IGNORECASE)
 
 
 def clean(text: str) -> str:
+    # ydotool types US-layout ASCII only and silently drops anything else, so
+    # fold accents ("café" -> "cafe") rather than lose the letters.
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
     out = _FILLER.sub("", text).strip()
     if not any(c.isalnum() for c in out):
         return ""
@@ -47,6 +51,7 @@ if __name__ == "__main__":
     assert clean("It was, um.") == "It was."
     assert clean("Uh.") == ""
     assert clean("Mm.") == ""
+    assert clean("A café in São Paulo, naïve.") == "A cafe in Sao Paulo, naive."
     assert clean("  Bring an umbrella, Uhura. ") == "Bring an umbrella, Uhura."
     import tempfile
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:

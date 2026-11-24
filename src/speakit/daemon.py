@@ -178,6 +178,14 @@ class Daemon:
             return self.toggle()
         if cmd == "status":
             return self.state
+        if cmd == "press":
+            return self.toggle()
+        if cmd == "release":
+            # Tap = toggle mode, keep recording. Hold = push-to-talk, stop now.
+            # (Release after a stopping tap finds state IDLE and does nothing.)
+            if self.state == RECORDING and time.monotonic() - self.rec_started >= cfg.HOLD_SECONDS:
+                return self.toggle()
+            return self.state
         if cmd == "stop" and self.state == RECORDING:
             return self.toggle()
         if cmd == "start" and self.state == IDLE:

@@ -5,7 +5,8 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 USER_SYSTEMD="$HOME/.config/systemd/user"
-UDEV_RULE="/etc/udev/rules.d/80-speakit-uinput.rules"
+UDEV_RULE="/etc/udev/rules.d/70-speakit-uinput.rules"
+OLD_UDEV_RULE="/etc/udev/rules.d/80-speakit-uinput.rules"
 
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*"; }
@@ -23,24 +24,29 @@ else
 fi
 
 # 2. uinput permissions ----------------------------------------------------
-# ydotoold needs write access to /dev/uinput. Give the 'input' group access
-# and add the user to it, so ydotoold can run as your user (no root daemon).
+# ydotoold needs write access to /dev/uinput. uaccess makes logind grant an
+# ACL on it to the user at the active seat only. (Not the 'input' group: that
+# also lets every process you run read raw keystrokes from /dev/input/event*.)
+# Must sort before 73-seat-late.rules, hence the 70- prefix.
 say "Configuring /dev/uinput permissions..."
 if [ ! -f "$UDEV_RULE" ]; then
-    echo 'KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' \
+    echo 'KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"' \
         | sudo tee "$UDEV_RULE" >/dev/null
     sudo udevadm control --reload-rules
-    sudo udevadm trigger /dev/uinput || true
+    sudo udevadm trigger --name-match=uinput || true
     say "udev rule installed."
 else
     say "udev rule already present."
 fi
 
-if ! id -nG "$USER" | tr ' ' '\n' | grep -qx input; then
-    sudo usermod -aG input "$USER"
-    warn "Added $USER to 'input' group. LOG OUT and back in for it to take effect."
-else
-    say "User already in 'input' group."
+# Migrate from older speakit installs, which used the 'input' group.
+if [ -f "$OLD_UDEV_RULE" ]; then
+    sudo rm "$OLD_UDEV_RULE"
+    sudo udevadm control --reload-rules
+    if id -nG "$USER" | tr ' ' '\n' | grep -qx input; then
+        sudo gpasswd -d "$USER" input
+        warn "Removed $USER from 'input' group. LOG OUT and back in for it to take effect."
+    fi
 fi
 
 # 3. Python env ------------------------------------------------------------
@@ -65,7 +71,10 @@ cat <<EOF
 
 1) Hyprland — add to ~/.config/hypr/hyprland.conf:
 
-   bind = SUPER, D, exec, $PROJECT_DIR/.venv/bin/speakit-toggle
+   bind  = SUPER, D, exec, $PROJECT_DIR/.venv/bin/speakit-toggle press
+   bindr = SUPER, D, exec, $PROJECT_DIR/.venv/bin/speakit-toggle release
+
+   Tap = toggle (tap again to stop). Hold = push-to-talk (release to stop).
 
    (services autostart via systemd; no exec-once needed)
 
@@ -81,8 +90,7 @@ cat <<EOF
    ...and put "custom/speakit" in your modules list. Style in style.css:
      #custom-speakit.recording { color: #ff5555; }
 
-If you were just added to the 'input' group, LOG OUT/IN, then:
-   systemctl --user restart ydotoold speakit
+If you were just removed from the 'input' group, LOG OUT/IN.
 
 Test:  press SUPER+D, speak, press again — text types into the focused window.
 EOF

@@ -32,27 +32,31 @@ cd ~/Desktop/web/speakit
 ```
 
 The installer: installs `ydotool`/`pipewire`/`libnotify`, sets `/dev/uinput`
-permissions (udev rule + adds you to the `input` group), `uv sync`s the Python
-env, and installs+enables the `ydotoold` and `speakit` **user** systemd services.
+permissions (udev `uaccess` rule: an ACL for the logged-in user only, no `input`
+group), `uv sync`s the Python env, and installs+enables the `ydotoold` and
+`speakit` **user** systemd services.
 
-> If it added you to the `input` group, **log out and back in**, then
-> `systemctl --user restart ydotoold speakit`.
+> Upgrading from an install that used the `input` group? Re-run `./install.sh`:
+> it removes the old rule and drops you from `input`; then log out and back in.
 
-Then add the Hyprland keybind (installer prints the exact line):
+Then add the Hyprland keybinds (installer prints the exact lines):
 
 ```
-bind = SUPER, D, exec, ~/Desktop/web/speakit/.venv/bin/speakit-toggle
+bind  = SUPER, D, exec, ~/Desktop/web/speakit/.venv/bin/speakit-toggle press
+bindr = SUPER, D, exec, ~/Desktop/web/speakit/.venv/bin/speakit-toggle release
 ```
 
 ## Usage
 
-- **SUPER+D** → 🎙 notification, speak.
-- **SUPER+D** again → transcribes, types text at the cursor, ✓ notification.
+- **Tap** SUPER+D → recording starts; **tap** again → transcribes and types at the cursor.
+- **Hold** SUPER+D while speaking → stops and types on release (push-to-talk).
+  A press shorter than `SPEAKIT_HOLD_SECONDS` (0.4) counts as a tap.
 
 CLI equivalents (for testing without the keybind):
 
 ```bash
 uv run speakit-toggle          # toggle start/stop
+uv run speakit-toggle press    # / release: what the keybinds send
 uv run speakit-toggle status   # idle | recording
 ```
 
@@ -104,7 +108,7 @@ The daemon pokes waybar (`SIGRTMIN+8`) on every state change for instant updates
 ## Troubleshooting
 
 - **Nothing types / `ydotool failed`** → ydotoold not running or no uinput perms.
-  `systemctl --user status ydotoold`; confirm you're in the `input` group (`id`) and relogged.
+  `systemctl --user status ydotoold`; `getfacl /dev/uinput` should list `user:$USER:rw-`.
 - **`daemon not running`** → `systemctl --user status speakit`; logs: `journalctl --user -u speakit -f`.
 - **Loaded on CPU (slow)** → check daemon log for the CUDA load error; ensure NVIDIA
   driver present. onnxruntime-gpu pulls its own CUDA 13 libs via pip (driver must support CUDA 13); no system CUDA toolkit needed.

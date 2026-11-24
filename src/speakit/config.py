@@ -53,6 +53,11 @@ MIC_TARGET = os.environ.get("SPEAKIT_MIC", "")
 KEY_DELAY = os.environ.get("SPEAKIT_KEY_DELAY", "0")
 KEY_HOLD = os.environ.get("SPEAKIT_KEY_HOLD", "1")
 
+# --- Keybind -----------------------------------------------------------------
+# "press"/"release" commands (bind + bindr): a press shorter than this is a tap
+# and leaves recording on (tap again to stop); a longer hold stops on release.
+HOLD_SECONDS = float(os.environ.get("SPEAKIT_HOLD_SECONDS", "0.4"))
+
 # --- Text ------------------------------------------------------------------
 # `wrong => right` per line, applied to every transcript (whole word, case-
 # insensitive). Re-read each dictation, so edits apply without a restart.
