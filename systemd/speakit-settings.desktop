@@ -3,5 +3,5 @@ Type=Application
 Name=speakit settings
 Comment=Voice-to-text settings
 Exec=@PROJECT_DIR@/.venv/bin/speakit-toggle settings
-Icon=audio-input-microphone
+Icon=speakit
 Categories=Settings;Utility;

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import {
-  RiBookOpenLine, RiCpuLine, RiFileCopyLine, RiHistoryLine, RiKeyboardBoxLine, RiMicLine,
+  RiBookOpenLine, RiCpuLine, RiFileCopyLine, RiHistoryLine, RiKeyboardBoxLine,
   RiRestartLine, RiSettings3Line, RiSparkling2Line, RiVolumeUpLine,
 } from "@remixicon/react";
 import { Tab, TabList, TabPanel, Tabs, type Key } from "react-aria-components";
@@ -35,8 +35,8 @@ function Group({ title, action, children }: { title?: string; action?: ReactNode
   return (
     <section>
       {(title || action) && (
-        <div className="mb-2 flex h-7 items-end justify-between px-4">
-          <h2 className="text-[13px] font-medium text-text-secondary">{title}</h2>
+        <div className="mb-1.5 flex h-6 items-end justify-between px-3.5">
+          <h2 className="text-[12px] font-medium text-text-secondary">{title}</h2>
           {action}
         </div>
       )}
@@ -49,10 +49,10 @@ function Group({ title, action, children }: { title?: string; action?: ReactNode
 
 function Row({ label, help, children, badge }: { label: string; help?: string; children?: ReactNode; badge?: ReactNode }) {
   return (
-    <div className="flex min-h-[56px] items-center justify-between gap-8 px-4 py-3">
+    <div className="flex min-h-[48px] items-center justify-between gap-6 px-3.5 py-2.5">
       <div className="min-w-0">
-        <div className="flex items-center gap-2 text-sm text-text-primary">{label}{badge}</div>
-        {help && <p className="mt-0.5 text-[12.5px] leading-snug text-pretty text-text-tertiary">{help}</p>}
+        <div className="flex items-center gap-2 text-[13px] text-text-primary">{label}{badge}</div>
+        {help && <p className="mt-0.5 text-[12px] leading-snug text-pretty text-text-tertiary">{help}</p>}
       </div>
       <div className="shrink-0">{children}</div>
     </div>
@@ -67,20 +67,20 @@ function Control({ s, value, onChange, disabled }: { s: Setting; value: Value; o
   if (s.choices.length)
     return (
       <Select aria-label={s.label} selectedKey={String(value)} isDisabled={disabled}
-        onSelectionChange={(k) => k != null && onChange(String(k))} className="w-60">
+        onSelectionChange={(k) => k != null && onChange(String(k))} className="w-56">
         {s.choices.map((c) => <SelectItem key={c} id={c}>{c || "Full precision"}</SelectItem>)}
       </Select>
     );
   if (typeof s.default === "number")
     return (
-      <NumberField aria-label={s.label} value={Number(value)} isDisabled={disabled} className="w-32 tabular-nums"
+      <NumberField aria-label={s.label} value={Number(value)} isDisabled={disabled} className="w-28 tabular-nums"
         formatOptions={{ useGrouping: false, maximumFractionDigits: 2 }}
         minValue={s.min ?? undefined} maxValue={s.max ?? undefined}
         step={s.name === "HOLD_SECONDS" || !Number.isInteger(s.default) ? 0.1 : 1}
         onChange={(v) => !Number.isNaN(v) && v !== value && onChange(v)} />
     );
   return (
-    <Input aria-label={s.label} value={draft} onChange={setDraft} isDisabled={disabled} className="w-56"
+    <Input aria-label={s.label} value={draft} onChange={setDraft} isDisabled={disabled} className="w-48"
       placeholder={s.name === "MIC_TARGET" ? "System default" : undefined}
       onBlur={() => draft !== value && onChange(draft)}
       onKeyDown={(e) => e.key === "Enter" && draft !== value && onChange(draft)} />
@@ -97,21 +97,21 @@ const KEYS = [
 function Keys() {
   return (
     <section>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-2">
         {KEYS.map(({ key, title, text, led }) => (
-          <div key={key} className="rounded-2xl bg-neutral-900 p-4 shadow-[0_0_0_1px_rgb(255_255_255/0.05),0_1px_3px_rgb(0_0_0/0.3)]">
+          <div key={key} className="rounded-xl bg-neutral-900 p-3 shadow-[0_0_0_1px_rgb(255_255_255/0.05),0_1px_3px_rgb(0_0_0/0.3)]">
             <div className="flex items-start justify-between">
               <kbd className="keycap">{key}</kbd>
               <span className="flex gap-1 pt-1">
                 {led.map((c) => <span key={c} className="size-1.5 rounded-full" style={{ background: c, boxShadow: `0 0 6px ${c}` }} />)}
               </span>
             </div>
-            <div className="mt-4 text-sm font-medium text-text-primary">{title}</div>
-            <p className="mt-1 text-[12.5px] leading-snug text-pretty text-text-tertiary">{text}</p>
+            <div className="mt-3 text-[13px] font-medium text-text-primary">{title}</div>
+            <p className="mt-0.5 text-[12px] leading-snug text-pretty text-text-tertiary">{text}</p>
           </div>
         ))}
       </div>
-      <p className="mt-3 px-4 text-[12.5px] text-text-tertiary">
+      <p className="mt-2 px-3.5 text-[12px] text-text-tertiary">
         Tap to start and tap again to stop, or hold while you talk. Rebind in hyprland.conf.
       </p>
     </section>
@@ -247,22 +247,20 @@ export default function App() {
   );
 
   return (
-    <Tabs orientation="vertical" selectedKey={page} onSelectionChange={setPage} className="grid h-screen grid-cols-[228px_1fr]">
-      <aside className="flex flex-col border-r border-black/40 bg-neutral-950 px-3 py-5">
-        <div className="mb-6 flex items-center gap-3 px-2">
-          <div className="grid size-8 place-items-center rounded-[9px] bg-linear-to-b from-accent-400 to-accent-600 text-(--on-accent) shadow-[inset_0_1px_0_rgb(255_255_255/0.25),inset_0_-2px_0_rgb(0_0_0/0.2)]">
-            <RiMicLine className="size-4" />
-          </div>
-          <div className="text-[15px] font-semibold tracking-[-0.01em] text-text-primary">speakit</div>
+    <Tabs orientation="vertical" selectedKey={page} onSelectionChange={setPage} className="grid h-screen grid-cols-[176px_1fr]">
+      <aside className="flex flex-col border-r border-black/40 bg-neutral-950 px-2 py-4">
+        <div className="mb-4 flex items-center gap-2.5 px-2">
+          <img src="/favicon.svg" alt="" className="size-7 rounded-[8px] shadow-[0_0_0_1px_rgb(255_255_255/0.06)]" />
+          <div className="text-[14px] font-semibold tracking-[-0.01em] text-text-primary">speakit</div>
         </div>
         <div ref={nav} className="relative">
           {/* One highlight that glides to the selected item (transform only, so it can be retargeted mid-move). */}
-          <div aria-hidden className="nav-pill absolute inset-x-0 top-0 h-9 rounded-lg bg-neutral-800 shadow-[inset_0_1px_0_rgb(255_255_255/0.04)]"
+          <div aria-hidden className="nav-pill absolute inset-x-0 top-0 h-8 rounded-md bg-neutral-800 shadow-[inset_0_1px_0_rgb(255_255_255/0.04)]"
             style={{ transform: `translateY(${pillY}px)` }} />
           <TabList aria-label="Settings" className="relative flex flex-col gap-0.5">
             {PAGES.map(({ id, label, icon: I }) => (
               <Tab key={id} id={id} className={({ isSelected, isFocusVisible }) => cx(
-                "flex h-9 cursor-default items-center gap-2.5 rounded-lg px-2.5 text-sm outline-none transition-[color,background-color] duration-150 active:scale-[0.98]",
+                "flex h-8 cursor-default items-center gap-2 rounded-md px-2 text-[13px] outline-none transition-[color,background-color] duration-150 active:scale-[0.98]",
                 isSelected ? "text-text-primary" : "text-text-secondary hover:bg-neutral-900/60 hover:text-text-primary",
                 isFocusVisible && "ring-2 ring-accent-500",
               )}>
@@ -271,12 +269,12 @@ export default function App() {
             ))}
           </TabList>
         </div>
-        <div className="mt-auto space-y-2 px-2.5">
+        <div className="mt-auto space-y-1.5 px-2">
           {status ? (
             <>
-              <Light on={status.state !== "recording"}>{status.state === "recording" ? "Recording" : "Ready to listen"}</Light>
-              <Light on={status.model_ready} warn>{status.model_ready ? `Speech model on ${status.device.toUpperCase()}` : "Speech model loading"}</Light>
-              <Light on={status.llm}>{status.llm ? "Cleanup model running" : "Cleanup model stopped"}</Light>
+              <Light on={status.state !== "recording"}>{status.state === "recording" ? "Recording" : "Ready"}</Light>
+              <Light on={status.model_ready} warn>{status.model_ready ? `Speech on ${status.device.toUpperCase()}` : "Speech loading"}</Light>
+              <Light on={status.llm}>{status.llm ? "Cleanup running" : "Cleanup stopped"}</Light>
             </>
           ) : <Light on={false}>speakit isn't running</Light>}
         </div>
@@ -284,10 +282,10 @@ export default function App() {
 
       <div ref={scroller} className="overflow-y-auto">
         {PAGES.map((p) => (
-          <TabPanel key={p.id} id={p.id} className="page mx-auto max-w-[680px] px-10 pt-10 pb-16 outline-none">
-            <header className="mb-7">
-              <h1 className="text-[26px] leading-tight font-semibold tracking-[-0.02em] text-text-primary">{p.title}</h1>
-              <p className="mt-1 text-sm text-text-secondary">{p.blurb}</p>
+          <TabPanel key={p.id} id={p.id} className="page px-6 pt-5 pb-8 outline-none">
+            <header className="mb-5">
+              <h1 className="text-[20px] leading-tight font-semibold tracking-[-0.02em] text-text-primary">{p.title}</h1>
+              <p className="mt-0.5 text-[13px] text-text-secondary">{p.blurb}</p>
             </header>
             {needsRestart && p.id === "model" && (
               <div className="mb-6 flex items-center justify-between rounded-xl bg-accent-950 px-4 py-3 shadow-[0_0_0_1px_var(--color-accent-800)]">
@@ -296,7 +294,7 @@ export default function App() {
                   .then(() => { setNeedsRestart(false); toast("Restarting speakit", { duration: 2500 }); })}>Restart</Button>
               </div>
             )}
-            <div className="page-body space-y-7">
+            <div className="page-body space-y-5">
               {p.id === "general" && <Keys />}
               {p.sections.map(section)}
               {p.id === "cleanup" && (

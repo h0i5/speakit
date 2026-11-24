@@ -66,6 +66,7 @@ if command -v pnpm >/dev/null; then
 else
     warn "pnpm not found: settings UI not built (dictation works without it)"
 fi
+install -Dm644 "$PROJECT_DIR/assets/speakit.svg" "$HOME/.local/share/icons/hicolor/scalable/apps/speakit.svg"
 sed "s|@PROJECT_DIR@|$PROJECT_DIR|" "$PROJECT_DIR/systemd/speakit-settings.desktop" \
     > "$HOME/.local/share/applications/speakit-settings.desktop"
 
