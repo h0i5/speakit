@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# speakit installer: deps, ydotool uinput perms, systemd user units.
+# speakit installer: deps, uinput perms, Rust keybind client, systemd user units.
 # Idempotent — safe to re-run.
 set -euo pipefail
 
@@ -12,14 +12,13 @@ say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*"; }
 
 # 1. System packages -------------------------------------------------------
-say "Installing system packages (ydotool, pipewire tools, libnotify)..."
+say "Installing system packages (pipewire tools, wl-clipboard, llama.cpp, rust)..."
 need_pkgs=()
-command -v ydotool   >/dev/null || need_pkgs+=(ydotool)
+command -v cargo     >/dev/null || need_pkgs+=(rust)
 command -v pw-record >/dev/null || need_pkgs+=(pipewire)
 command -v notify-send >/dev/null || need_pkgs+=(libnotify)
 command -v llama-server >/dev/null || need_pkgs+=(llama-cpp ggml-vulkan)
 command -v wl-copy     >/dev/null || need_pkgs+=(wl-clipboard)
-command -v playerctl   >/dev/null || need_pkgs+=(playerctl)
 if [ ${#need_pkgs[@]} -gt 0 ]; then
     sudo pacman -S --needed "${need_pkgs[@]}"
 else
@@ -27,7 +26,7 @@ else
 fi
 
 # 2. uinput permissions ----------------------------------------------------
-# ydotoold needs write access to /dev/uinput. uaccess makes logind grant an
+# The daemon types through its own virtual keyboard, so it needs write access to /dev/uinput. uaccess makes logind grant an
 # ACL on it to the user at the active seat only. (Not the 'input' group: that
 # also lets every process you run read raw keystrokes from /dev/input/event*.)
 # Must sort before 73-seat-late.rules, hence the 70- prefix.
@@ -60,6 +59,10 @@ say "Fetching cleanup LLM (Qwen3-4B-Instruct Q4, ~2.4 GB, skipped if present)...
 "$PROJECT_DIR/.venv/bin/hf" download unsloth/Qwen3-4B-Instruct-2507-GGUF \
     Qwen3-4B-Instruct-2507-Q4_K_M.gguf --local-dir "$HOME/.cache/speakit/llm" >/dev/null
 
+say "Building the keybind client (Rust, ~1 ms per key press)..."
+( cd "$PROJECT_DIR/client" && cargo build --release )
+install -Dm755 "$PROJECT_DIR/client/target/release/speakit-toggle" "$HOME/.local/bin/speakit-toggle"
+
 say "Building the settings UI (pnpm)..."
 if command -v pnpm >/dev/null; then
     ( cd "$PROJECT_DIR/ui" && pnpm install --frozen-lockfile && pnpm build ) || warn "settings UI build failed"
@@ -73,11 +76,11 @@ sed "s|@PROJECT_DIR@|$PROJECT_DIR|" "$PROJECT_DIR/systemd/speakit-settings.deskt
 # 4. systemd user units ----------------------------------------------------
 say "Installing systemd user units..."
 mkdir -p "$USER_SYSTEMD"
-cp "$PROJECT_DIR/systemd/ydotoold.service" "$USER_SYSTEMD/"
 cp "$PROJECT_DIR/systemd/speakit.service"  "$USER_SYSTEMD/"
 cp "$PROJECT_DIR/systemd/speakit-llm.service" "$USER_SYSTEMD/"
 systemctl --user daemon-reload
-systemctl --user enable --now ydotoold.service || warn "ydotoold start failed (relog if perms just changed)"
+# Older installs typed through ydotoold; speakit no longer needs it.
+systemctl --user disable --now ydotoold.service 2>/dev/null || true
 systemctl --user enable --now speakit.service  || warn "speakit start failed (check: journalctl --user -u speakit)"
 systemctl --user enable --now speakit-llm.service || warn "speakit-llm start failed (check: journalctl --user -u speakit-llm)"
 
@@ -90,17 +93,17 @@ cat <<EOF
 
 1) Hyprland — add to ~/.config/hypr/hyprland.conf:
 
-   bind  = SUPER, D, exec, $PROJECT_DIR/.venv/bin/speakit-toggle press
-   bindr = SUPER, D, exec, $PROJECT_DIR/.venv/bin/speakit-toggle release
+   bind  = , Home, exec, $HOME/.local/bin/speakit-toggle press
+   bindr = , Home, exec, $HOME/.local/bin/speakit-toggle release
 
-   bind  = , Insert, exec, $PROJECT_DIR/.venv/bin/speakit-toggle press-clean
-   bindr = , Insert, exec, $PROJECT_DIR/.venv/bin/speakit-toggle release
+   bind  = , Insert, exec, $HOME/.local/bin/speakit-toggle press-clean
+   bindr = , Insert, exec, $HOME/.local/bin/speakit-toggle release
 
    Tap = toggle (tap again to stop). Hold = push-to-talk (release to stop).
    Insert works the same, plus LLM cleanup + formatting.
 
-   bind  = , End, exec, $PROJECT_DIR/.venv/bin/speakit-toggle press-command
-   bindr = , End, exec, $PROJECT_DIR/.venv/bin/speakit-toggle release
+   bind  = , End, exec, $HOME/.local/bin/speakit-toggle press-command
+   bindr = , End, exec, $HOME/.local/bin/speakit-toggle release
 
    End = command mode: select text, say what to do with it.
 
@@ -120,5 +123,5 @@ cat <<EOF
 
 If you were just removed from the 'input' group, LOG OUT/IN.
 
-Test:  press SUPER+D, speak, press again — text types into the focused window.
+Test:  press Home, speak, press again — text types into the focused window.
 EOF

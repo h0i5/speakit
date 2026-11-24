@@ -20,6 +20,7 @@ from collections import deque
 
 from . import config as cfg
 from . import desktop as dk
+from . import native as nv
 from .polish import app_style, command, polish
 from .text import ascii_fold, clean, load_replacements, replace
 
@@ -59,7 +60,7 @@ def set_state(state: str) -> None:
     except OSError as e:
         log(f"state write failed: {e}")
     # waybar custom modules refresh on SIGRTMIN+N.
-    subprocess.run(["pkill", f"-RTMIN+{cfg.WAYBAR_SIGNAL}", "waybar"], check=False)
+    nv.signal_waybar(cfg.WAYBAR_SIGNAL)
 
 
 class Daemon:
@@ -75,6 +76,10 @@ class Daemon:
         self.mode = "raw"
         self.paused: list[str] = []  # media players we paused, to resume
         self.cues = dk.make_cues(cfg.RUNTIME_DIR)
+        try:
+            dk.kb()  # create the virtual keyboard now, not on first dictation
+        except OSError as e:
+            log(f"no /dev/uinput access ({e}); typing will fail. Re-run install.sh.")
         # Recent dictations for the settings UI (memory only, never on disk).
         self.history: deque[dict] = deque(maxlen=50)
         # Socket handler and the auto-stop timer thread both drive state.
@@ -177,23 +182,14 @@ class Daemon:
         try:
             for i, line in enumerate(lines):
                 if i:
-                    # Newline as Shift+Enter (keycodes 42 LEFTSHIFT, 28 ENTER):
-                    # a bare Enter would send the message in chat apps/Claude Code.
-                    subprocess.run(["ydotool", "key", "42:1", "28:1", "28:0", "42:0"], check=True)
+                    # Newline as Shift+Enter: a bare Enter would send the
+                    # message in chat apps/Claude Code.
+                    dk.kb().combo(nv.SHIFT, nv.ENTER)
                 if line:
-                    subprocess.run(
-                        ["ydotool", "type",
-                         "--key-delay", str(cfg.KEY_DELAY),
-                         "--key-hold", str(cfg.KEY_HOLD),
-                         "--", line],
-                        check=True,
-                    )
-        except FileNotFoundError:
-            notify("speakit error", "ydotool not found", urgency="critical")
-            log("ydotool missing")
-        except subprocess.CalledProcessError as e:
-            notify("speakit error", "ydotool failed (is ydotoold running?)", urgency="critical")
-            log(f"ydotool failed: {e}")
+                    dk.kb().type(line, cfg.KEY_DELAY, cfg.KEY_HOLD)
+        except OSError as e:
+            notify("speakit error", "can't type: no /dev/uinput access", urgency="critical")
+            log(f"typing failed: {e}")
 
     # --- command handling --------------------------------------------------
     def toggle(self) -> str:

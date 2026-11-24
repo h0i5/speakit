@@ -1,7 +1,6 @@
 [Unit]
 Description=speakit voice-to-text daemon
-After=graphical-session.target ydotoold.service
-Wants=ydotoold.service
+After=graphical-session.target
 PartOf=graphical-session.target
 
 [Service]
@@ -13,8 +12,6 @@ WorkingDirectory=%h/Desktop/web/speakit
 ExecStart=%h/Desktop/web/speakit/.venv/bin/speakitd
 Restart=on-failure
 RestartSec=2
-# Talk to the same ydotoold socket the user unit creates.
-Environment=YDOTOOL_SOCKET=%t/.ydotool_socket
 
 [Install]
 WantedBy=graphical-session.target

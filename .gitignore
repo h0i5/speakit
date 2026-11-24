@@ -54,3 +54,4 @@ CLAUDE.local.md
 *.swo
 .DS_Store
 Thumbs.db
+client/target

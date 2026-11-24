@@ -1,0 +1,14 @@
+[package]
+name = "speakit-toggle"
+version = "0.1.0"
+edition = "2024"
+description = "Keybind client for the speakit daemon (sends one command over its Unix socket)."
+
+[dependencies]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

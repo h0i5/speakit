@@ -10,18 +10,19 @@ A local, free, private alternative to Claude Code `/voice` that works **everywhe
 
 ```
 Hyprland bind ─► speakit-toggle ─unix socket─► speakitd (daemon)
-  (SUPER+D)       (thin client)                ├─ Parakeet ASR model resident in VRAM  
+  (Home)          (Rust, ~1 ms)                ├─ Parakeet ASR model resident in VRAM
                                                ├─ pw-record → 16k mono WAV
-                                               ├─ transcribe (Parakeet TDT v2, CUDA)   
-                                               ├─ ydotool type → focused window
-                                               └─ notify-send + waybar indicator
+                                               ├─ transcribe (Parakeet TDT v2, CUDA)
+                                               ├─ own uinput keyboard → focused window
+                                               └─ waybar indicator
 ```
 
 The daemon keeps the ASR model loaded in GPU memory, so each dictation only
 pays transcription time (tens of ms for short clips), not the model load. First toggle starts recording; second stops, transcribes, and types.
 
 - **Engine**: NVIDIA Parakeet TDT 0.6B v2 via [onnx-asr](https://github.com/istupakov/onnx-asr) on CUDA (English, punctuated).
-- **Injection**: `ydotool` (kernel uinput) — works in terminals, browsers, Electron, XWayland.
+- **Injection**: the daemon's own virtual keyboard (kernel uinput, no ydotoold) — works in terminals, browsers, Electron, XWayland.
+- **Desktop calls**: Hyprland's socket, MPRIS over D-Bus and waybar signals are done in-process (~1 ms each) instead of spawning hyprctl/playerctl/pkill.
 - **Audio**: PipeWire `pw-record`.
 - **Cleanup** (opt-in per dictation): Qwen3-4B-Instruct Q4 on llama.cpp/Vulkan
   (`speakit-llm.service`, ~2.8 GB VRAM, ~0.2–0.8 s). If it's down, raw text is typed.
@@ -33,10 +34,10 @@ cd ~/Desktop/web/speakit
 ./install.sh
 ```
 
-The installer: installs `ydotool`/`pipewire`/`libnotify`, sets `/dev/uinput`
-permissions (udev `uaccess` rule: an ACL for the logged-in user only, no `input`
-group), `uv sync`s the Python env, and installs+enables the `ydotoold` and
-`speakit` **user** systemd services.
+The installer: installs system packages, sets `/dev/uinput` permissions (udev
+`uaccess` rule: an ACL for the logged-in user only, no `input` group), `uv sync`s
+the Python env, builds the Rust keybind client into `~/.local/bin/speakit-toggle`,
+and installs+enables the `speakit` and `speakit-llm` **user** systemd services.
 
 > Upgrading from an install that used the `input` group? Re-run `./install.sh`:
 > it removes the old rule and drops you from `input`; then log out and back in.
@@ -44,14 +45,14 @@ group), `uv sync`s the Python env, and installs+enables the `ydotoold` and
 Then add the Hyprland keybinds (installer prints the exact lines):
 
 ```
-bind  = SUPER, D, exec, ~/Desktop/web/speakit/.venv/bin/speakit-toggle press
-bindr = SUPER, D, exec, ~/Desktop/web/speakit/.venv/bin/speakit-toggle release
+bind  = , Home, exec, ~/.local/bin/speakit-toggle press
+bindr = , Home, exec, ~/.local/bin/speakit-toggle release
 ```
 
 ## Usage
 
-- **Tap** SUPER+D → recording starts; **tap** again → transcribes and types at the cursor.
-- **Hold** SUPER+D while speaking → stops and types on release (push-to-talk).
+- **Tap** Home → recording starts; **tap** again → transcribes and types at the cursor.
+- **Hold** Home while speaking → stops and types on release (push-to-talk).
   A press shorter than `SPEAKIT_HOLD_SECONDS` (0.4) counts as a tap.
 - **Insert** (tap or hold, same as the dictation key; or press it to stop a
   running dictation) → cleanup mode: a local LLM fixes grammar, drops false starts, applies
@@ -170,8 +171,9 @@ The daemon pokes waybar (`SIGRTMIN+8`) on every state change for instant updates
 
 ## Troubleshooting
 
-- **Nothing types / `ydotool failed`** → ydotoold not running or no uinput perms.
-  `systemctl --user status ydotoold`; `getfacl /dev/uinput` should list `user:$USER:rw-`.
+- **Nothing types** → no uinput access: `getfacl /dev/uinput` should list
+  `user:$USER:rw-` (re-run `./install.sh`, then log out/in). The daemon log says
+  `no /dev/uinput access` at startup when this is the cause.
 - **`daemon not running`** → `systemctl --user status speakit`; logs: `journalctl --user -u speakit -f`.
 - **Loaded on CPU (slow)** → check daemon log for the CUDA load error; ensure NVIDIA
   driver present. onnxruntime-gpu pulls its own CUDA 13 libs via pip (driver must support CUDA 13); no system CUDA toolkit needed.

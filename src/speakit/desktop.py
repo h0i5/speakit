@@ -1,17 +1,28 @@
 """Desktop glue: media pause, cue sounds, focused window, clipboard paste/copy."""
 from __future__ import annotations
 
-import json
 import subprocess
 import time
 import wave
 from pathlib import Path
 
+from . import native as nv
+
 TERMINALS = {"kitty", "foot", "alacritty", "wezterm", "org.wezfurlong.wezterm",
              "ghostty", "com.mitchellh.ghostty", "konsole", "xterm"}
 
-# Linux input keycodes for ydotool.
+# Linux input keycodes.
 CTRL, SHIFT, C, V = 29, 42, 46, 47
+_kb: nv.Keyboard | None = None
+
+
+def kb() -> nv.Keyboard:
+    """The shared uinput keyboard (created once; the compositor needs a moment
+    to pick up a new device, so the daemon creates it at startup)."""
+    global _kb
+    if _kb is None:
+        _kb = nv.Keyboard()
+    return _kb
 
 
 def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
@@ -28,10 +39,7 @@ def _copy(data: bytes, mime: str = "text/plain;charset=utf-8") -> None:
 # --- focused window ------------------------------------------------------------
 def active_window() -> tuple[str, str]:
     """(class, title) of the focused window, lowercased; empty if unknown."""
-    try:
-        w = json.loads(_run(["hyprctl", "activewindow", "-j"]).stdout or b"{}")
-    except (OSError, ValueError, subprocess.TimeoutExpired):
-        return "", ""
+    w = nv.active_window()
     return str(w.get("class", "")).lower(), str(w.get("title", "")).lower()
 
 
@@ -50,19 +58,12 @@ def is_editor(cls: str) -> bool:
 # --- media ----------------------------------------------------------------------
 def pause_media() -> list[str]:
     """Pause every MPRIS player that is playing; return their names to resume."""
-    try:
-        out = _run(["playerctl", "-a", "metadata", "--format", "{{playerInstance}} {{status}}"]).stdout.decode()
-    except (OSError, subprocess.TimeoutExpired):
-        return []
-    playing = [line.split()[0] for line in out.splitlines() if line.endswith(" Playing")]
-    for p in playing:
-        _run(["playerctl", "-p", p, "pause"])
-    return playing
+    return nv.mpris("pause")
 
 
 def resume_media(players: list[str]) -> None:
-    for p in players:
-        _run(["playerctl", "-p", p, "play"])
+    if players:
+        nv.mpris("play", players)
 
 
 # --- cue sounds -----------------------------------------------------------------
@@ -123,9 +124,8 @@ def clip_restore(saved: tuple[str, bytes] | None) -> None:
 
 
 def _keys(*combo: int) -> None:
-    downs = [f"{k}:1" for k in combo]
-    ups = [f"{k}:0" for k in reversed(combo)]
-    _run(["ydotool", "key", *downs, *ups])
+    time.sleep(0.05)  # let the forked wl-copy take clipboard ownership first
+    kb().combo(*combo)
 
 
 def copy_selection(terminal: bool, editor: bool = False) -> str:
