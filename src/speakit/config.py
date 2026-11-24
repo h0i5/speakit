@@ -78,18 +78,20 @@ SETTINGS = [
             "After this, cleanup falls back to the raw transcript.", min=1, max=60),
     # --- feedback
     Setting("NOTIFY", "feedback", False, "Desktop notifications", "The waybar indicator usually covers it."),
-    Setting("DONE_TICK_SECONDS", "feedback", 2.0, "Done tick duration (seconds)", min=0.5, max=10),
+    Setting("DONE_TICK_SECONDS", "feedback", 2.0, "Done tick duration (seconds)",
+            "How long the tick stays in waybar after text is typed.", min=0.5, max=10),
     Setting("WAYBAR_SIGNAL", "feedback", 8, "Waybar signal", "Must match \"signal\" in the waybar module.",
             min=1, max=30),
     # --- speech model
-    Setting("MODEL", "model", "nemo-parakeet-tdt-0.6b-v2", "Speech model",
+    Setting("MODEL", "model", "nemo-parakeet-tdt-0.6b-v2", "Model",
             "Any onnx-asr model. v3 adds 25 European languages; v2 is best for English.", restart=True,
             choices=("nemo-parakeet-tdt-0.6b-v2", "nemo-parakeet-tdt-0.6b-v3")),
-    Setting("DEVICE", "model", "cuda", "Device", "cpu frees the GPU (slower).", restart=True,
+    Setting("DEVICE", "model", "cuda", "Device", "CPU frees the GPU but is slower.", restart=True,
             choices=("cuda", "cpu")),
     Setting("QUANTIZATION", "model", "", "Quantization", "int8 is smaller, mainly for CPU.", restart=True,
             choices=("", "int8")),
-    Setting("UI_PORT", "model", 8766, "Settings UI port", restart=True, min=1024, max=65535),
+    Setting("UI_PORT", "model", 8766, "Settings window port", "Local port this window is served on.",
+            restart=True, min=1024, max=65535),
 ]
 BY_NAME = {s.name: s for s in SETTINGS}
 

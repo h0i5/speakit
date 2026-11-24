@@ -35,7 +35,7 @@ function Group({ title, action, children }: { title?: string; action?: ReactNode
   return (
     <section>
       {(title || action) && (
-        <div className="mb-1.5 flex h-7 items-end justify-between ps-3.5">
+        <div className="mb-1.5 flex h-7 items-end justify-between px-3.5">
           <h2 className="text-[12px] font-medium text-text-secondary">{title}</h2>
           {action}
         </div>
@@ -80,7 +80,7 @@ function Control({ s, value, onChange, disabled }: { s: Setting; value: Value; o
         onChange={(v) => !Number.isNaN(v) && v !== value && onChange(v)} />
     );
   return (
-    <Input aria-label={s.label} value={draft} onChange={setDraft} isDisabled={disabled} className="w-48"
+    <Input aria-label={s.label} value={draft} onChange={setDraft} isDisabled={disabled} className="w-80"
       placeholder={s.name === "MIC_TARGET" ? "System default" : undefined}
       onBlur={() => draft !== value && onChange(draft)}
       onKeyDown={(e) => e.key === "Enter" && draft !== value && onChange(draft)} />
@@ -99,7 +99,7 @@ function Keys() {
     <section>
       <div className="grid grid-cols-3 gap-2">
         {KEYS.map(({ key, title, text, led }) => (
-          <div key={key} className="rounded-xl bg-neutral-900 p-3 shadow-[0_0_0_1px_rgb(255_255_255/0.05),0_1px_3px_rgb(0_0_0/0.3)]">
+          <div key={key} className="rounded-xl bg-neutral-900 p-3.5 shadow-[0_0_0_1px_rgb(255_255_255/0.05),0_1px_3px_rgb(0_0_0/0.3)]">
             <div className="flex items-start justify-between">
               <kbd className="keycap">{key}</kbd>
               <span className="flex gap-1 pt-1">
@@ -124,7 +124,7 @@ function Words() {
   if (text === null) return null;
   return (
     <Group>
-      <div className="space-y-3 p-4">
+      <div className="space-y-3 p-3.5">
         <p className="text-[12.5px] text-text-tertiary">
           One fix per line, written <code className="text-text-secondary">heard =&gt; meant</code>. Matches whole words
           in any case, and works for snippets too.
@@ -159,13 +159,17 @@ function History() {
       {items.map((h) => {
         const [label, color] = MODE[h.mode];
         return (
-          <div key={h.time} className="flex items-start gap-4 px-4 py-3">
-            <div className="w-20 shrink-0 pt-0.5 text-[12.5px] text-text-tertiary tabular-nums">
-              {new Date(h.time * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-              <div className="mt-1 flex items-center gap-1.5"><span className="size-1.5 rounded-full" style={{ background: color }} />{label}</div>
+          <div key={h.time} className="group flex items-start gap-4 px-3.5 py-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-[13px] leading-5 whitespace-pre-wrap text-pretty text-text-primary">{h.text}</p>
+              <div className="mt-1 flex items-center gap-3 text-[12px] leading-4 text-text-tertiary">
+                <span className="flex items-center gap-1.5"><span className="size-1.5 rounded-full" style={{ background: color }} />{label}</span>
+                {h.app && <span>{h.app}</span>}
+                <span className="tabular-nums">{new Date(h.time * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
+              </div>
             </div>
-            <p className="min-w-0 flex-1 text-sm whitespace-pre-wrap text-pretty text-text-primary">{h.text}</p>
             <Button variant="secondary" size="xs" iconOnly leadingIcon={RiFileCopyLine} aria-label="Copy text"
+              className="opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100"
               onClick={() => navigator.clipboard.writeText(h.text).then(() => toast("Copied", { duration: 1200 }))} />
           </div>
         );
@@ -176,8 +180,8 @@ function History() {
 
 function Light({ on, warn, children }: { on: boolean; warn?: boolean; children: ReactNode }) {
   return (
-    <div className="flex items-center gap-2.5 text-[12.5px] text-text-secondary">
-      <span className={cx("size-1.5 rounded-full", on ? "bg-[#5fd38d]" : warn ? "bg-neutral-500" : "bg-[#ff5555]")} />
+    <div className="flex items-center gap-2 text-[12px] text-text-secondary">
+      <span className="grid size-4 place-items-center"><span className={cx("size-1.5 rounded-full", on ? "bg-[#5fd38d]" : warn ? "bg-neutral-500" : "bg-[#ff5555]")} /></span>
       {children}
     </div>
   );
