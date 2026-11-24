@@ -134,6 +134,7 @@ S D F S => SDFs
 #custom-speakit.done {
   color: #50fa7b;
   background-color: #16241c;
+  padding: 3px 16px 3px 12px; /* optical centring for the tick glyph */
 }
 
 @keyframes speakit-blink-red {
