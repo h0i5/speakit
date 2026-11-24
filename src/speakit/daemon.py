@@ -18,6 +18,7 @@ import threading
 import time
 
 from . import config as cfg
+from .text import clean, load_replacements, replace
 
 # Logic states.
 IDLE = "idle"
@@ -121,9 +122,9 @@ class Daemon:
     # --- transcribe + inject ----------------------------------------------
     def transcribe(self, wav: str) -> str:
         t0 = time.monotonic()
-        text = self.model.recognize(wav)
-        if cfg.TRIM_OUTPUT:
-            text = text.strip()
+        text = clean(self.model.recognize(wav))
+        if text:
+            text = replace(text, load_replacements(cfg.REPLACEMENTS_PATH))
         log(f"transcribed in {time.monotonic() - t0:.2f}s: {text!r}")
         return text
 
@@ -133,7 +134,8 @@ class Daemon:
                 ["ydotool", "type",
                  "--key-delay", cfg.KEY_DELAY,
                  "--key-hold", cfg.KEY_HOLD,
-                 "--", text],
+                 # Trailing space so back-to-back dictations don't run together.
+                 "--", text + " "],
                 check=True,
             )
         except FileNotFoundError:
@@ -197,7 +199,12 @@ class Daemon:
                 ort.preload_dlls()
                 # HEURISTIC: the default exhaustive cuDNN search re-runs for
                 # every new clip length, making each first-seen length slow.
-                providers.insert(0, ("CUDAExecutionProvider", {"cudnn_conv_algo_search": "HEURISTIC"}))
+                # kSameAsRequested: grow the VRAM arena exactly, not in doubling
+                # chunks (~500 MiB less resident, same speed).
+                providers.insert(0, ("CUDAExecutionProvider", {
+                    "cudnn_conv_algo_search": "HEURISTIC",
+                    "arena_extend_strategy": "kSameAsRequested",
+                }))
             # ORT falls back to CPU by itself if the CUDA provider can't start.
             model = onnx_asr.load_model(cfg.MODEL, cfg.MODEL_DIR, quantization=cfg.QUANTIZATION or None, providers=providers)
             model.recognize(np.zeros(cfg.SAMPLE_RATE, dtype=np.float32))  # warm up

@@ -8,11 +8,11 @@ PartOf=graphical-session.target
 Type=simple
 # Point this at the project dir if you move it.
 WorkingDirectory=%h/Desktop/web/speakit
-ExecStart=/usr/bin/uv run speakitd
+# Run the venv entrypoint directly: no uv parent process, no env re-sync
+# (and no network) on every start. install.sh runs uv sync.
+ExecStart=%h/Desktop/web/speakit/.venv/bin/speakitd
 Restart=on-failure
 RestartSec=2
-# Keep the HF model cache warm across restarts.
-Environment=HF_HOME=%h/.cache/huggingface
 # Talk to the same ydotoold socket the user unit creates.
 Environment=YDOTOOL_SOCKET=%t/.ydotool_socket
 

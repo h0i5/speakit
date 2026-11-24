@@ -53,6 +53,14 @@ MIC_TARGET = os.environ.get("SPEAKIT_MIC", "")
 KEY_DELAY = os.environ.get("SPEAKIT_KEY_DELAY", "0")
 KEY_HOLD = os.environ.get("SPEAKIT_KEY_HOLD", "1")
 
+# --- Text ------------------------------------------------------------------
+# `wrong => right` per line, applied to every transcript (whole word, case-
+# insensitive). Re-read each dictation, so edits apply without a restart.
+REPLACEMENTS_PATH = Path(
+    os.environ.get("SPEAKIT_REPLACEMENTS")
+    or Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "speakit" / "replacements.txt"
+)
+
 # --- Feedback --------------------------------------------------------------
 # Real-time signal number waybar listens on (waybar uses SIGRTMIN+N).
 WAYBAR_SIGNAL = int(os.environ.get("SPEAKIT_WAYBAR_SIGNAL", "8"))
@@ -62,6 +70,3 @@ WAYBAR_SIGNAL = int(os.environ.get("SPEAKIT_WAYBAR_SIGNAL", "8"))
 NOTIFY = os.environ.get("SPEAKIT_NOTIFY", "0") != "0"
 # How long the ✓ tick stays in waybar after a successful type, then hides.
 DONE_TICK_SECONDS = float(os.environ.get("SPEAKIT_DONE_TICK_SECONDS", "2"))
-
-# Trim surrounding whitespace from the transcript before typing.
-TRIM_OUTPUT = True

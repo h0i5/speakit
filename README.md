@@ -67,7 +67,22 @@ Set in `~/.config/systemd/user/speakit.service` (`Environment=...`) or your shel
 | `SPEAKIT_QUANTIZATION` | (full precision) | `int8` = smaller, mainly for CPU |
 | `SPEAKIT_MIC` | (default source) | PipeWire source name/id; `pactl list short sources` |
 | `SPEAKIT_WAYBAR_SIGNAL` | `8` | must match `"signal"` in your waybar module |
-| `SPEAKIT_NOTIFY` | `1` | `0` disables desktop notifications |
+| `SPEAKIT_NOTIFY` | `0` | `1` enables desktop notifications |
+| `SPEAKIT_REPLACEMENTS` | `~/.config/speakit/replacements.txt` | word fixes, see below |
+
+## Transcript cleanup
+
+Filler words (uh, um, hmm) are dropped, and a trailing space is typed so
+back-to-back dictations don't run together.
+
+For names/jargon the model mishears, add `wrong => right` lines to
+`~/.config/speakit/replacements.txt` (whole word, case-insensitive, `#` comments).
+Re-read on every dictation, so no restart needed:
+
+```
+Zo => Zoho
+S D F S => SDFs
+```
 
 ## Waybar indicator (optional)
 
