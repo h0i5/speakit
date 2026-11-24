@@ -78,7 +78,20 @@ uv run speakit-toggle press    # / release: what the keybinds send
 uv run speakit-toggle status   # idle | recording
 ```
 
+## Settings app
+
+`speakit-toggle settings` (or "speakit settings" in your app launcher) opens a
+settings window: keys, recording, typing, cleanup, word fixes, recent
+dictations and the speech model. It's a small React app (`ui/`, BoardUI
+components) served by the daemon on `127.0.0.1:8766`; the API needs a random
+per-start token that only the launcher can read. Changes save to
+`~/.config/speakit/config.toml` and apply live, except those marked *restart*.
+
+Rebuild after editing `ui/`: `cd ui && pnpm install && pnpm build`.
+
 ## Config (env vars)
+
+Env vars override `config.toml`.
 
 Set in `~/.config/systemd/user/speakit.service` (`Environment=...`) or your shell:
 

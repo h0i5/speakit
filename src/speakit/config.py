@@ -1,7 +1,16 @@
-"""Central config + paths for speakit. Override most via env vars."""
+"""Central config + paths for speakit.
+
+Settings resolve as: SPEAKIT_<NAME> env var > ~/.config/speakit/config.toml >
+default. The daemon reads `cfg.NAME` at use time, so `reload()` (called when
+the settings UI saves, or the file changes) applies most settings live; the
+ones marked restart=True only take effect when the daemon restarts.
+"""
 from __future__ import annotations
 
+import json
 import os
+import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -14,83 +23,178 @@ def _runtime_dir() -> Path:
 
 
 RUNTIME_DIR = _runtime_dir()
+CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "speakit"
+CONFIG_PATH = CONFIG_DIR / "config.toml"
 
 # Unix socket the daemon listens on; the toggle client connects here.
 SOCKET_PATH = RUNTIME_DIR / "speakit.sock"
-
-# State file read by the waybar module ("recording" or "idle").
+# State file read by the waybar module ("recording", "idle", ...).
 STATE_PATH = RUNTIME_DIR / "speakit.state"
-
 # Temp WAV the recorder writes and the transcriber reads.
 WAV_PATH = RUNTIME_DIR / "speakit.wav"
+# Bearer token for the settings UI's API (random per daemon start, 0600).
+UI_TOKEN_PATH = RUNTIME_DIR / "speakit-ui.token"
+# Built settings UI (ui/ -> pnpm build).
+UI_DIST = Path(__file__).resolve().parents[2] / "ui" / "dist"
 
-# --- ASR model -------------------------------------------------------------
-# Any onnx-asr model name. Parakeet TDT v2: English-only, punctuated output,
-# far more accurate and faster than whisper-large-v3-turbo.
-MODEL = os.environ.get("SPEAKIT_MODEL", "nemo-parakeet-tdt-0.6b-v2")
-DEVICE = os.environ.get("SPEAKIT_DEVICE", "cuda")  # "cpu" to skip the GPU
-# "" = full precision (best on GPU); "int8" = smaller, mainly for CPU.
-QUANTIZATION = os.environ.get("SPEAKIT_QUANTIZATION", "")
+SAMPLE_RATE = 16000  # model native
+CHANNELS = 1
+
+
+@dataclass(frozen=True)
+class Setting:
+    name: str          # module attribute, env var SPEAKIT_<name>, toml key <section>.<name.lower()>
+    section: str
+    default: object
+    label: str
+    help: str = ""
+    restart: bool = False
+    choices: tuple = ()
+    min: float | None = None
+    max: float | None = None
+
+
+SETTINGS = [
+    # --- recording
+    Setting("HOLD_SECONDS", "recording", 0.4, "Tap vs hold threshold",
+            "A press shorter than this is a tap (toggle); longer is push-to-talk.", min=0.1, max=2),
+    Setting("MAX_RECORD_SECONDS", "recording", 120.0, "Auto-stop after (seconds)",
+            "A recording left running this long is stopped and typed.", min=10, max=600),
+    Setting("PAUSE_MEDIA", "recording", True, "Pause music while recording",
+            "Pauses Spotify, browser video etc. and resumes them after."),
+    Setting("SOUNDS", "recording", True, "Start/stop sounds", "Soft thocks when the mic opens and closes."),
+    Setting("MIC_TARGET", "recording", "", "Microphone",
+            "PipeWire source name; empty = system default. See pactl list short sources."),
+    # --- typing
+    Setting("PASTE_MIN_CHARS", "typing", 150, "Paste instead of type from (chars)",
+            "Longer text is pasted via the clipboard (restored after). Non-ASCII is always pasted.",
+            min=0, max=5000),
+    Setting("KEY_DELAY", "typing", 0, "Key delay (ms)", "Delay between typed keys.", min=0, max=50),
+    Setting("KEY_HOLD", "typing", 1, "Key hold (ms)", "Raise to 2-4 if an app drops characters.", min=0, max=50),
+    # --- cleanup (LLM)
+    Setting("LLM_URL", "cleanup", "http://127.0.0.1:8765/v1/chat/completions", "Cleanup server",
+            "OpenAI-compatible chat completions endpoint used by cleanup and command mode."),
+    Setting("LLM_TIMEOUT", "cleanup", 8.0, "Timeout (seconds)",
+            "After this, cleanup falls back to the raw transcript.", min=1, max=60),
+    # --- feedback
+    Setting("NOTIFY", "feedback", False, "Desktop notifications", "The waybar indicator usually covers it."),
+    Setting("DONE_TICK_SECONDS", "feedback", 2.0, "Done tick duration (seconds)", min=0.5, max=10),
+    Setting("WAYBAR_SIGNAL", "feedback", 8, "Waybar signal", "Must match \"signal\" in the waybar module.",
+            min=1, max=30),
+    # --- speech model
+    Setting("MODEL", "model", "nemo-parakeet-tdt-0.6b-v2", "Speech model",
+            "Any onnx-asr model. v3 adds 25 European languages; v2 is best for English.", restart=True,
+            choices=("nemo-parakeet-tdt-0.6b-v2", "nemo-parakeet-tdt-0.6b-v3")),
+    Setting("DEVICE", "model", "cuda", "Device", "cpu frees the GPU (slower).", restart=True,
+            choices=("cuda", "cpu")),
+    Setting("QUANTIZATION", "model", "", "Quantization", "int8 is smaller, mainly for CPU.", restart=True,
+            choices=("", "int8")),
+    Setting("UI_PORT", "model", 8766, "Settings UI port", restart=True, min=1024, max=65535),
+]
+BY_NAME = {s.name: s for s in SETTINGS}
+
+
+def _coerce(s: Setting, v: object) -> object:
+    """Value converted to the setting's type; ValueError if it doesn't fit."""
+    d = s.default
+    if isinstance(d, bool):
+        if isinstance(v, str):
+            v = v.strip().lower() not in ("0", "false", "no", "off", "")
+        v = bool(v)
+    elif isinstance(d, int):
+        v = int(v)
+    elif isinstance(d, float):
+        v = float(v)
+    else:
+        v = str(v)
+    if s.choices and v not in s.choices:
+        raise ValueError(f"{s.name}: {v!r} not in {s.choices}")
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        if (s.min is not None and v < s.min) or (s.max is not None and v > s.max):
+            raise ValueError(f"{s.name}: {v} outside {s.min}..{s.max}")
+    return v
+
+
+def read_file() -> dict[str, object]:
+    """Settings present in config.toml, by name (unknown/invalid keys skipped)."""
+    try:
+        data = tomllib.loads(CONFIG_PATH.read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+    out = {}
+    for s in SETTINGS:
+        if s.name.lower() in data.get(s.section, {}):
+            try:
+                out[s.name] = _coerce(s, data[s.section][s.name.lower()])
+            except (TypeError, ValueError):
+                pass
+    return out
+
+
+def env_overrides() -> set[str]:
+    return {s.name for s in SETTINGS if f"SPEAKIT_{s.name}" in os.environ}
+
+
+def reload() -> None:
+    """Recompute every setting into module globals (env > file > default)."""
+    from_file = read_file()
+    g = globals()
+    for s in SETTINGS:
+        v = os.environ.get(f"SPEAKIT_{s.name}")
+        try:
+            g[s.name] = _coerce(s, v) if v is not None else from_file.get(s.name, s.default)
+        except (TypeError, ValueError):
+            g[s.name] = from_file.get(s.name, s.default)
+
+
+def save(changes: dict[str, object]) -> None:
+    """Validate and merge changes into config.toml, then reload. Raises
+    ValueError/KeyError on a bad name or value (nothing written then)."""
+    current = read_file()
+    for name, v in changes.items():
+        current[name] = _coerce(BY_NAME[name], v)
+    lines = ["# speakit settings (written by the settings UI; hand edits are fine)."]
+    for section in dict.fromkeys(s.section for s in SETTINGS):
+        rows = [s for s in SETTINGS if s.section == section and s.name in current]
+        if rows:
+            lines.append(f"\n[{section}]")
+            # json.dumps output is valid TOML for str/int/float; bools need lowercase.
+            lines += [f"{s.name.lower()} = {json.dumps(current[s.name])}" for s in rows]
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = CONFIG_PATH.with_suffix(".tmp")
+    tmp.write_text("\n".join(lines) + "\n")
+    tmp.replace(CONFIG_PATH)
+    reload()
+
+
+reload()
+
+# Paths that derive from settings (restart-only, so computed once).
 # Model files live here as plain files: onnxruntime >=1.32 rejects the HF hub
 # cache (its symlinks point outside the model dir). Downloaded on first run.
 # ponytail: an interrupted first download leaves a partial dir; delete it to retry.
 MODEL_DIR = Path(
     os.environ.get("SPEAKIT_MODEL_DIR")
-    or Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "speakit" / MODEL
+    or Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "speakit" / MODEL  # noqa: F821
 )
-
-# --- Audio -----------------------------------------------------------------
-SAMPLE_RATE = 16000  # model native
-CHANNELS = 1
-# PipeWire source target. Empty = default source. Set SPEAKIT_MIC to override.
-MIC_TARGET = os.environ.get("SPEAKIT_MIC", "")
-
-# --- Injection -------------------------------------------------------------
-# ydotool defaults to 20ms key-delay + 20ms key-hold => ~40ms/char (slow,
-# visible letter-by-letter). 0/1 makes typing effectively instant while staying
-# universal (works in terminals, browsers, web inputs). Bump KEY_HOLD to 2-4 if
-# a specific app drops characters.
-KEY_DELAY = os.environ.get("SPEAKIT_KEY_DELAY", "0")
-KEY_HOLD = os.environ.get("SPEAKIT_KEY_HOLD", "1")
-
-# --- Keybind -----------------------------------------------------------------
-# "press"/"release" commands (bind + bindr): a press shorter than this is a tap
-# and leaves recording on (tap again to stop); a longer hold stops on release.
-HOLD_SECONDS = float(os.environ.get("SPEAKIT_HOLD_SECONDS", "0.4"))
-
-# --- Text ------------------------------------------------------------------
-# `wrong => right` per line, applied to every transcript (whole word, case-
-# insensitive). Re-read each dictation, so edits apply without a restart.
-REPLACEMENTS_PATH = Path(
-    os.environ.get("SPEAKIT_REPLACEMENTS")
-    or Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "speakit" / "replacements.txt"
-)
-
-# --- LLM cleanup ("clean" key) -------------------------------------------------
-# OpenAI-compatible chat endpoint (llama-server from speakit-llm.service).
-# If it's down or slow, the raw transcript is typed instead.
-LLM_URL = os.environ.get("SPEAKIT_LLM_URL", "http://127.0.0.1:8765/v1/chat/completions")
-LLM_TIMEOUT = float(os.environ.get("SPEAKIT_LLM_TIMEOUT", "8"))
-
-# --- Desktop -------------------------------------------------------------------
-# Pause playing media (MPRIS: Spotify, browsers, mpv...) while recording.
-PAUSE_MEDIA = os.environ.get("SPEAKIT_PAUSE_MEDIA", "1") != "0"
-# Start/stop cue sounds. Built-in soft blips unless a file path is given.
-SOUNDS = os.environ.get("SPEAKIT_SOUNDS", "1") != "0"
+# `wrong => right` per line, applied to every transcript (re-read each dictation).
+REPLACEMENTS_PATH = Path(os.environ.get("SPEAKIT_REPLACEMENTS") or CONFIG_DIR / "replacements.txt")
 SOUND_START = os.environ.get("SPEAKIT_SOUND_START", "")
 SOUND_STOP = os.environ.get("SPEAKIT_SOUND_STOP", "")
-# Text at least this long is pasted (clipboard restored after) instead of typed.
-PASTE_MIN_CHARS = int(os.environ.get("SPEAKIT_PASTE_MIN_CHARS", "150"))
 
-# Auto-stop (and transcribe) a recording left running this long.
-MAX_RECORD_SECONDS = float(os.environ.get("SPEAKIT_MAX_RECORD_SECONDS", "120"))
 
-# --- Feedback --------------------------------------------------------------
-# Real-time signal number waybar listens on (waybar uses SIGRTMIN+N).
-WAYBAR_SIGNAL = int(os.environ.get("SPEAKIT_WAYBAR_SIGNAL", "8"))
-# Desktop notifications OFF by default — the waybar indicator is enough.
-# Re-enable any time without code changes: set SPEAKIT_NOTIFY=1 (env / systemd
-# unit) and restart the daemon.
-NOTIFY = os.environ.get("SPEAKIT_NOTIFY", "0") != "0"
-# How long the ✓ tick stays in waybar after a successful type, then hides.
-DONE_TICK_SECONDS = float(os.environ.get("SPEAKIT_DONE_TICK_SECONDS", "2"))
+if __name__ == "__main__":
+    import tempfile
+    CONFIG_DIR = Path(tempfile.mkdtemp())
+    CONFIG_PATH = CONFIG_DIR / "config.toml"
+    save({"PAUSE_MEDIA": False, "HOLD_SECONDS": "0.6", "MODEL": "nemo-parakeet-tdt-0.6b-v3"})
+    assert PAUSE_MEDIA is False and HOLD_SECONDS == 0.6, (PAUSE_MEDIA, HOLD_SECONDS)  # noqa: F821
+    assert tomllib.loads(CONFIG_PATH.read_text())["recording"]["pause_media"] is False
+    for bad in ({"DEVICE": "tpu"}, {"HOLD_SECONDS": 99}, {"NOPE": 1}):
+        try:
+            save(bad)
+            raise AssertionError(bad)
+        except (ValueError, KeyError):
+            pass
+    assert read_file()["MODEL"] == "nemo-parakeet-tdt-0.6b-v3"
+    print("ok")

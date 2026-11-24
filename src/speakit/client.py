@@ -38,8 +38,28 @@ def send(cmd: str) -> str:
             return ""
 
 
+def open_settings() -> None:
+    """Open the settings UI as a standalone app window. The token goes in the
+    URL fragment, which browsers never send to the server or into history."""
+    try:
+        token = cfg.UI_TOKEN_PATH.read_text().strip()
+    except OSError:
+        _notify_dead()
+        sys.exit(1)
+    url = f"http://127.0.0.1:{cfg.UI_PORT}/#token={token}"
+    for browser in (["google-chrome-stable", f"--app={url}"], ["chromium", f"--app={url}"], ["xdg-open", url]):
+        try:
+            subprocess.Popen(browser, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            return
+        except FileNotFoundError:
+            continue
+
+
 def main() -> None:
     cmd = sys.argv[1] if len(sys.argv) > 1 else "toggle"
+    if cmd == "settings":
+        open_settings()
+        return
     reply = send(cmd)
     print(reply)
     if reply == "no-daemon":

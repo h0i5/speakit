@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 
 from . import config as cfg
 from . import desktop as dk
@@ -73,7 +74,9 @@ class Daemon:
         # (LLM cleanup) or "command" (instruction applied to the selection).
         self.mode = "raw"
         self.paused: list[str] = []  # media players we paused, to resume
-        self.cues = dk.make_cues(cfg.RUNTIME_DIR) if cfg.SOUNDS else None
+        self.cues = dk.make_cues(cfg.RUNTIME_DIR)
+        # Recent dictations for the settings UI (memory only, never on disk).
+        self.history: deque[dict] = deque(maxlen=50)
         # Socket handler and the auto-stop timer thread both drive state.
         self.lock = threading.Lock()
 
@@ -113,7 +116,7 @@ class Daemon:
         self.state = RECORDING
         self._display_gen += 1  # invalidate any pending done-tick timer
         set_state({"clean": RECORDING_POLISH, "command": RECORDING_COMMAND}.get(self.mode, RECORDING))
-        if self.cues:
+        if cfg.SOUNDS:
             dk.play(cfg.SOUND_START or self.cues[0])
 
         def auto_stop() -> None:
@@ -142,7 +145,7 @@ class Daemon:
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
-        if self.cues:
+        if cfg.SOUNDS:
             dk.play(cfg.SOUND_STOP or self.cues[1])
         dk.resume_media(self.paused)
         self.paused = []
@@ -180,8 +183,8 @@ class Daemon:
                 if line:
                     subprocess.run(
                         ["ydotool", "type",
-                         "--key-delay", cfg.KEY_DELAY,
-                         "--key-hold", cfg.KEY_HOLD,
+                         "--key-delay", str(cfg.KEY_DELAY),
+                         "--key-hold", str(cfg.KEY_HOLD),
                          "--", line],
                         check=True,
                     )
@@ -234,6 +237,7 @@ class Daemon:
             notify("speakit", "no speech detected")
             return "empty"
         self.inject(text, terminal, trailing)
+        self.history.append({"time": time.time(), "mode": self.mode, "app": cls, "text": text})
         notify("✓ Transcription done")
         self.flash_done()
         return "typed"
@@ -311,6 +315,12 @@ class Daemon:
         log(f"listening on {cfg.SOCKET_PATH}")
 
         threading.Thread(target=load_model, daemon=True).start()
+        try:
+            from .server import serve
+            serve(self)
+            log(f"settings UI on http://127.0.0.1:{cfg.UI_PORT}")
+        except OSError as e:  # port taken: dictation still works
+            log(f"settings UI disabled: {e}")
 
         while True:
             try:

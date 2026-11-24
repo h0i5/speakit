@@ -60,6 +60,15 @@ say "Fetching cleanup LLM (Qwen3-4B-Instruct Q4, ~2.4 GB, skipped if present)...
 "$PROJECT_DIR/.venv/bin/hf" download unsloth/Qwen3-4B-Instruct-2507-GGUF \
     Qwen3-4B-Instruct-2507-Q4_K_M.gguf --local-dir "$HOME/.cache/speakit/llm" >/dev/null
 
+say "Building the settings UI (pnpm)..."
+if command -v pnpm >/dev/null; then
+    ( cd "$PROJECT_DIR/ui" && pnpm install --frozen-lockfile && pnpm build ) || warn "settings UI build failed"
+else
+    warn "pnpm not found: settings UI not built (dictation works without it)"
+fi
+sed "s|@PROJECT_DIR@|$PROJECT_DIR|" "$PROJECT_DIR/systemd/speakit-settings.desktop" \
+    > "$HOME/.local/share/applications/speakit-settings.desktop"
+
 # 4. systemd user units ----------------------------------------------------
 say "Installing systemd user units..."
 mkdir -p "$USER_SYSTEMD"
