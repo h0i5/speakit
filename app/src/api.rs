@@ -42,6 +42,29 @@ pub struct Item {
     pub text: String,
 }
 
+/// One search result (see the daemon's search.py).
+#[derive(Debug, Clone, Deserialize)]
+pub struct Hit {
+    pub kind: String,
+    pub id: Value,
+    pub page: String,
+    pub title: String,
+    #[serde(default)]
+    pub sub: String,
+    #[serde(default)]
+    pub switch: bool,
+    #[serde(default)]
+    pub time: Option<f64>,
+    #[serde(default)]
+    pub app: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Found {
+    pub results: Vec<Hit>,
+    pub semantic: bool,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Stats {
     pub dictations: u64,

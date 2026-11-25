@@ -144,6 +144,13 @@ opens a native settings window built with Rust and gpui. Changes are saved to
 changes, which apply after a restart. The sidebar shows whether the daemon, the
 speech model and the cleanup server are running.
 
+**Search** (Ctrl+K) covers settings, pages, actions, shortcuts, word fixes and
+your dictation history. It matches meaning as well as words: "mute spotify"
+finds *Pause music while recording*. That part comes from a small local embedding model
+(bge-small, about 34 MB, downloaded on first start, runs on the CPU). Typos and
+half-typed words still match. Words like `slack`, `yesterday` or `cleanup` filter
+history. Enter jumps to a setting, runs an action, or copies a past dictation.
+
 <table>
   <tr>
     <td><img src="docs/screenshots/typing.png" alt="Typing page"></td>
@@ -274,6 +281,7 @@ matching control in the settings app.
 | `SPEAKIT_HOLD_SECONDS` | `0.4` | Presses shorter than this are taps; longer ones are push-to-talk |
 | `SPEAKIT_MAX_RECORD_SECONDS` | `120` | Recordings stop and type after this long |
 | `SPEAKIT_PAUSE_MEDIA` | `1` | Pause MPRIS media players while recording |
+| `SPEAKIT_FADE_SECONDS` | `0.3` | Music fade out/in around a recording; `0` cuts instantly |
 | `SPEAKIT_SOUNDS` | `1` | Start and stop sounds |
 | `SPEAKIT_MIC_TARGET` | system default | PipeWire source name; see `pactl list short sources` |
 | `SPEAKIT_PASTE_MIN_CHARS` | `150` | Paste instead of typing from this length |

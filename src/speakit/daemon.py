@@ -133,7 +133,7 @@ class Daemon:
             cmd += ["--target", cfg.MIC_TARGET]
         cmd.append(str(cfg.WAV_PATH))
         if cfg.PAUSE_MEDIA:
-            self.paused = dk.pause_media()
+            self.paused = dk.pause_media(cfg.FADE_SECONDS)
         try:
             self.rec_proc = subprocess.Popen(cmd)
         except FileNotFoundError:
@@ -178,7 +178,7 @@ class Daemon:
             proc.wait()
         if cfg.SOUNDS:
             dk.play(cfg.SOUND_STOP or self.cues[1])
-        dk.resume_media(self.paused)
+        dk.resume_media(self.paused, cfg.FADE_SECONDS)
         self.paused = []
         self.rec_secs = dur = time.monotonic() - self.rec_started
         log(f"recording stopped ({dur:.1f}s)")
@@ -194,7 +194,7 @@ class Daemon:
         if proc is not None:
             proc.kill()
             proc.wait()
-        dk.resume_media(self.paused)
+        dk.resume_media(self.paused, cfg.FADE_SECONDS)
         self.paused = []
         set_state(IDLE)
         if cfg.SOUNDS:

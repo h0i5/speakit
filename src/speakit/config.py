@@ -52,49 +52,76 @@ class Setting:
     choices: tuple = ()
     min: float | None = None
     max: float | None = None
+    keywords: str = ""  # extra words for the app's search (synonyms the label lacks)
 
 
 SETTINGS = [
     # --- recording
     Setting("HOLD_SECONDS", "recording", 0.4, "Tap vs hold threshold",
-            "A press shorter than this is a tap (toggle); longer is push-to-talk.", min=0.1, max=2),
+            "A press shorter than this is a tap (toggle); longer is push-to-talk.", min=0.1, max=2,
+            keywords="push to talk ptt press long short tap"),
     Setting("MAX_RECORD_SECONDS", "recording", 120.0, "Auto-stop after (seconds)",
-            "A recording left running this long is stopped and typed.", min=10, max=600),
+            "A recording left running this long is stopped and typed.", min=10, max=600,
+            keywords="timeout limit length duration long recording"),
     Setting("PAUSE_MEDIA", "recording", True, "Pause music while recording",
-            "Pauses Spotify, browser video etc. and resumes them after."),
-    Setting("SOUNDS", "recording", True, "Start/stop sounds", "Soft thocks when the mic opens and closes."),
+            "Pauses Spotify, browser video etc. and resumes them after.",
+            keywords="spotify mute music songs audio media youtube video player silence"),
+    Setting("FADE_SECONDS", "recording", 0.3, "Music fade (seconds)",
+            "Fade out before pausing and back in on resume; 0 = cut. Browsers that block volume control just cut.",
+            min=0, max=3,
+            keywords="music volume fade smooth transition spotify"),
+    Setting("SOUNDS", "recording", True, "Start/stop sounds", "Soft thocks when the mic opens and closes.",
+            keywords="beep chime cue audio thock click noise"),
+    Setting("SOUND_START", "recording", "", "Start sound", "Path to a WAV file; empty = the built-in thock.",
+            keywords="custom beep chime cue wav audio file"),
+    Setting("SOUND_STOP", "recording", "", "Stop sound", "Path to a WAV file; empty = the built-in thock.",
+            keywords="custom beep chime cue wav audio file"),
     Setting("MIC_TARGET", "recording", "", "Microphone",
-            "PipeWire source name; empty = system default. See pactl list short sources."),
+            "PipeWire source name; empty = system default. See pactl list short sources.",
+            keywords="mic input source device headset pipewire"),
     # --- typing
     Setting("PASTE_MIN_CHARS", "typing", 150, "Paste instead of type from (chars)",
             "Longer text is pasted via the clipboard (restored after). Non-ASCII is always pasted.",
-            min=0, max=5000),
-    Setting("KEY_DELAY", "typing", 0, "Key delay (ms)", "Delay between typed keys.", min=0, max=50),
-    Setting("KEY_HOLD", "typing", 1, "Key hold (ms)", "Raise to 2-4 if an app drops characters.", min=0, max=50),
+            min=0, max=5000,
+            keywords="clipboard long text paste"),
+    Setting("KEY_DELAY", "typing", 0, "Key delay (ms)", "Delay between typed keys.", min=0, max=50,
+            keywords="slow speed typing characters dropped wait"),
+    Setting("KEY_HOLD", "typing", 1, "Key hold (ms)", "Raise to 2-4 if an app drops characters.", min=0, max=50,
+            keywords="dropped missing skipped characters letters typing broken"),
     # --- cleanup (LLM)
     Setting("LLM_URL", "cleanup", "http://127.0.0.1:8765/v1/chat/completions", "Cleanup server",
-            "OpenAI-compatible chat completions endpoint used by cleanup and command mode."),
+            "OpenAI-compatible chat completions endpoint used by cleanup and command mode.",
+            keywords="llm ai model endpoint openai llama server api"),
     Setting("LLM_TIMEOUT", "cleanup", 8.0, "Timeout (seconds)",
-            "After this, cleanup falls back to the raw transcript.", min=1, max=60),
+            "After this, cleanup falls back to the raw transcript.", min=1, max=60,
+            keywords="slow llm ai wait"),
     # --- feedback
-    Setting("NOTIFY", "feedback", False, "Desktop notifications", "The waybar indicator usually covers it."),
+    Setting("NOTIFY", "feedback", False, "Desktop notifications", "The waybar indicator usually covers it.",
+            keywords="notifications popup alerts"),
     Setting("DONE_TICK_SECONDS", "feedback", 2.0, "Done tick duration (seconds)",
-            "How long the tick stays in waybar after text is typed.", min=0.5, max=10),
+            "How long the tick stays in waybar after text is typed.", min=0.5, max=10,
+            keywords="checkmark indicator waybar undo revert"),
     Setting("SAVE_HISTORY", "history", True, "Keep history on disk",
             "Saves dictations to ~/.local/share/speakit/history.jsonl for the History page and stats. "
-            "Off = last 50 in memory only."),
+            "Off = last 50 in memory only.",
+            keywords="privacy disk transcripts log stats"),
     Setting("WAYBAR_SIGNAL", "feedback", 8, "Waybar signal", "Must match \"signal\" in the waybar module.",
-            min=1, max=30),
+            min=1, max=30,
+            keywords="status bar indicator"),
     # --- speech model
     Setting("MODEL", "model", "nemo-parakeet-tdt-0.6b-v2", "Model",
             "Any onnx-asr model. v3 adds 25 European languages; v2 is best for English.", restart=True,
-            choices=("nemo-parakeet-tdt-0.6b-v2", "nemo-parakeet-tdt-0.6b-v3")),
+            choices=("nemo-parakeet-tdt-0.6b-v2", "nemo-parakeet-tdt-0.6b-v3"),
+            keywords="asr parakeet language languages english european multilingual spanish french german italian accuracy"),
     Setting("DEVICE", "model", "cuda", "Device", "CPU frees the GPU but is slower.", restart=True,
-            choices=("cuda", "cpu")),
+            choices=("cuda", "cpu"),
+            keywords="gpu graphics card nvidia cuda cpu processor vram"),
     Setting("QUANTIZATION", "model", "", "Quantization", "int8 is smaller, mainly for CPU.", restart=True,
-            choices=("", "int8")),
+            choices=("", "int8"),
+            keywords="int8 smaller memory faster cpu"),
     Setting("UI_PORT", "model", 8766, "Settings window port", "Local port this window is served on.",
-            restart=True, min=1024, max=65535),
+            restart=True, min=1024, max=65535,
+            keywords="network port server"),
 ]
 BY_NAME = {s.name: s for s in SETTINGS}
 
@@ -186,8 +213,6 @@ MODEL_DIR = Path(
 REPLACEMENTS_PATH = Path(os.environ.get("SPEAKIT_REPLACEMENTS") or CONFIG_DIR / "replacements.txt")
 # One JSON object per dictation (cfg.SAVE_HISTORY), read back for history + stats.
 HISTORY_PATH = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "speakit" / "history.jsonl"
-SOUND_START = os.environ.get("SPEAKIT_SOUND_START", "")
-SOUND_STOP = os.environ.get("SPEAKIT_SOUND_STOP", "")
 
 
 if __name__ == "__main__":

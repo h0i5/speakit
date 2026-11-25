@@ -3,11 +3,11 @@ mod api;
 mod theme;
 mod widgets;
 
-use api::{Api, Item, Saved, Settings, Stats, Status, Words};
+use api::{Api, Found, Hit, Item, Saved, Settings, Stats, Status, Words};
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, ClickEvent, ClipboardItem, Context, Entity, Focusable, FontWeight, SharedString, StyledText, Subscription, TextRun, Window, WindowBounds,
-    WindowOptions, div, font, px, size,
+    AnyElement, App, Bounds, ClickEvent, ClipboardItem, Context, Entity, Focusable, FontWeight, KeyDownEvent, Pixels, ScrollHandle, SharedString, StyledText,
+    Subscription, TextRun, Window, WindowBounds, WindowOptions, canvas, div, font, point, px, size,
 };
 use gpui_component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_component::scroll::ScrollableElement;
@@ -15,7 +15,9 @@ use gpui_component::select::{Select, SelectEvent, SelectItem, SelectState};
 use gpui_component::{ActiveTheme, Root};
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 use theme::*;
 use widgets::*;
@@ -52,6 +54,8 @@ const TONES: [(&str, &str); 3] = [
     ("Gmail, Thunderbird, Outlook", "Polished paragraphs."),
 ];
 
+gpui::actions!(speakit, [FocusSearch]);
+
 /// cubic-bezier(0.2, 0, 0, 1), the web UI's motion curve.
 fn ease(x: f32) -> f32 {
     let x = x.clamp(0.0, 1.0);
@@ -86,6 +90,10 @@ impl Glide {
 
 /// Hover/focus fade, like the web UI's 150 ms transition.
 const RING_MS: u64 = 150;
+/// Switch thumb slide.
+const SWITCH_MS: u64 = 200;
+/// Search result row height (fixed, so the selection pill can glide between rows).
+const HIT_H: f32 = 56.;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Tone {
@@ -139,7 +147,25 @@ struct SettingsWindow {
     subscriptions: Vec<Subscription>,
     /// Hover/focus level per element (0 idle, 1 hover, 2 focus), eased between levels.
     rings: HashMap<SharedString, Glide>,
+    /// Boolean settings' switch positions (0 off, 1 on), eased between.
+    switches: HashMap<String, Glide>,
     hovered: std::collections::HashSet<SharedString>,
+    /// Holds keyboard focus when no field does, so Ctrl+K reaches our action handler.
+    focus: gpui::FocusHandle,
+    search: Entity<InputState>,
+    hits: Vec<Hit>,
+    /// The query the shown hits answer ("" = no search open).
+    query: String,
+    semantic: bool,
+    sel: usize,
+    sel_glide: Glide,
+    search_gen: u64,
+    /// A search jump: the setting row to flash, and scroll into view.
+    flash: Option<(String, Instant)>,
+    scroll_to: Option<String>,
+    target: Rc<Cell<Option<Bounds<Pixels>>>>,
+    scroll: ScrollHandle,
+    scroll_glide: Option<Glide>,
     /// Key-card easter egg: a tapped keycap latches like a recording.
     latched: [bool; 3],
     key_at: [Instant; 3],
@@ -149,7 +175,8 @@ impl SettingsWindow {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let page = std::env::args().nth(1).and_then(|a| PAGES.iter().position(|p| p.id == a)).unwrap_or(0);
         let past = Instant::now() - Duration::from_secs(1);
-        let this = Self {
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search"));
+        let mut this = Self {
             api: Api::new(),
             page,
             settings: None,
@@ -167,10 +194,29 @@ impl SettingsWindow {
             ticks: 0,
             subscriptions: Vec::new(),
             rings: HashMap::new(),
+            switches: HashMap::new(),
             hovered: Default::default(),
             latched: [false; 3],
             key_at: [past; 3],
+            focus: cx.focus_handle(),
+            search: search.clone(),
+            hits: Vec::new(),
+            query: String::new(),
+            semantic: false,
+            sel: 0,
+            sel_glide: Glide { from: 0., to: 0., at: past },
+            search_gen: 0,
+            flash: None,
+            scroll_to: None,
+            target: Rc::new(Cell::new(None)),
+            scroll: ScrollHandle::new(),
+            scroll_glide: None,
         };
+        this.subscriptions.push(cx.subscribe_in(&search, window, |this, _, e: &InputEvent, window, cx| match e {
+            InputEvent::Change => this.on_query(window, cx),
+            InputEvent::PressEnter { .. } => this.open(this.sel, window, cx),
+            _ => {}
+        }));
         this.load_status(window, cx);
         this.load_settings(window, cx);
         this.load_page(window, cx);
@@ -190,14 +236,15 @@ impl SettingsWindow {
     fn request<T: DeserializeOwned + Send + 'static>(
         &self,
         method: &'static str,
-        path: &'static str,
+        path: impl Into<String>,
         body: Option<Value>,
         window: &mut Window,
         cx: &mut Context<Self>,
         done: impl FnOnce(&mut Self, Result<T, String>, &mut Window, &mut Context<Self>) + 'static,
     ) {
         let api = self.api.clone();
-        let call = cx.background_executor().spawn(async move { api.call::<T>(method, path, body) });
+        let path = path.into();
+        let call = cx.background_executor().spawn(async move { api.call::<T>(method, &path, body) });
         cx.spawn_in(window, async move |this, cx| {
             let result = call.await;
             this.update_in(cx, |this, window, cx| {
@@ -362,7 +409,11 @@ impl SettingsWindow {
                     this.needs_restart |= restart;
                     this.notify(if restart { "Saved. Restart to apply." } else { "Saved" }, None, Tone::Success, 1500, window, cx);
                 }
-                Err(e) => this.notify(format!("{label} not saved"), Some(e), Tone::Error, 5000, window, cx),
+                Err(e) => {
+                    this.notify(format!("{label} not saved"), Some(e), Tone::Error, 5000, window, cx);
+                    // Undo an optimistic switch flip.
+                    this.load_settings(window, cx);
+                }
             }
             this.sync(window, cx);
         });
@@ -400,16 +451,169 @@ impl SettingsWindow {
     fn retarget(&mut self, now: Instant, window: &Window, cx: &App) -> bool {
         // Every key with a level too: one that just lost hover must still fade back to 0.
         let keys: Vec<SharedString> =
-            self.inputs.keys().map(|k| SharedString::from(k.clone())).chain(self.hovered.iter().cloned()).chain(self.rings.keys().cloned()).collect();
+            self.inputs.keys().map(|k| SharedString::from(k.clone())).chain([SharedString::from("search")]).chain(self.hovered.iter().cloned()).chain(self.rings.keys().cloned()).collect();
         for k in keys {
-            let focused = self.inputs.get(k.as_ref()).is_some_and(|s| s.read(cx).focus_handle(cx).is_focused(window));
+            let state = if k.as_ref() == "search" { Some(&self.search) } else { self.inputs.get(k.as_ref()) };
+            let focused = state.is_some_and(|s| s.read(cx).focus_handle(cx).is_focused(window));
             let to = if focused { 2. } else if self.hovered.contains(&k) { 1. } else { 0. };
             let g = self.rings.entry(k).or_insert(Glide { from: 0., to: 0., at: now });
             if g.to != to {
                 *g = Glide { from: g.value(now, RING_MS), to, at: now };
             }
         }
-        self.rings.values().any(|g| now.saturating_duration_since(g.at) < Duration::from_millis(RING_MS + 20))
+        if let Some(s) = &self.settings {
+            for (name, v) in &s.values {
+                let Some(on) = v.as_bool() else { continue };
+                let to = if on { 1. } else { 0. };
+                let g = self.switches.entry(name.clone()).or_insert(Glide { from: to, to, at: now - Duration::from_secs(1) });
+                if g.to != to {
+                    *g = Glide { from: g.value(now, SWITCH_MS), to, at: now };
+                }
+            }
+        }
+        let moving = |g: &Glide, ms: u64| now.saturating_duration_since(g.at) < Duration::from_millis(ms + 20);
+        self.rings.values().any(|g| moving(g, RING_MS)) | self.switches.values().any(|g| moving(g, SWITCH_MS))
+    }
+
+    /// Flips a boolean setting now, so its switch slides on click rather than after the round trip.
+    fn flip(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(s) = &mut self.settings else { return };
+        let on = !s.values.get(name).and_then(Value::as_bool).unwrap_or(false);
+        s.values.insert(name.to_string(), Value::Bool(on));
+        self.save(name.to_string(), Value::Bool(on), window, cx);
+        cx.notify();
+    }
+
+    fn restart(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.needs_restart = false;
+        self.notify("Restarting speakit", None, Tone::Neutral, 2500, window, cx);
+        self.request("POST", "restart", None, window, cx, |_, _: Result<Value, String>, _, _| {});
+    }
+
+    /// Search box edited: ask the daemon after a short pause in typing; stale answers are dropped.
+    fn on_query(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let q = self.search.read(cx).value().trim().to_string();
+        self.search_gen += 1;
+        let generation = self.search_gen;
+        if q.is_empty() {
+            if !self.query.is_empty() {
+                self.page_at = Instant::now();
+            }
+            self.hits.clear();
+            self.query.clear();
+            cx.notify();
+            return;
+        }
+        cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor().timer(Duration::from_millis(80)).await;
+            this.update_in(cx, |this, window, cx| {
+                if this.search_gen != generation {
+                    return;
+                }
+                this.request("GET", format!("search?q={}", urlencode(&q)), None, window, cx, move |this, r: Result<Found, String>, _, _| {
+                    let Ok(found) = r else { return };
+                    if this.search_gen != generation {
+                        return;
+                    }
+                    let now = Instant::now();
+                    if this.query.is_empty() {
+                        this.page_at = now;
+                    }
+                    this.hits = found.results;
+                    this.semantic = found.semantic;
+                    this.query = q;
+                    this.sel = 0;
+                    this.sel_glide = Glide { from: 0., to: 0., at: now - Duration::from_secs(1) };
+                });
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn select(&mut self, i: usize, cx: &mut Context<Self>) {
+        if self.hits.is_empty() || i == self.sel {
+            return;
+        }
+        let now = Instant::now();
+        self.sel = i.min(self.hits.len() - 1);
+        self.sel_glide = Glide { from: self.sel_glide.value(now, 180), to: self.sel as f32 * HIT_H, at: now };
+        cx.notify();
+    }
+
+    /// Arrows move through results, Esc clears the search (a second Esc leaves the box).
+    fn search_key(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        match e.keystroke.key.as_str() {
+            "down" => self.select((self.sel + 1).min(self.hits.len().saturating_sub(1)), cx),
+            "up" => self.select(self.sel.saturating_sub(1), cx),
+            "escape" => {
+                if self.search.read(cx).value().is_empty() {
+                    window.focus(&self.focus, cx);
+                } else {
+                    self.clear_search(window, cx);
+                }
+            }
+            _ => return,
+        }
+        cx.stop_propagation();
+    }
+
+    fn clear_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.search.update(cx, |s, cx| s.set_value("", window, cx));
+        self.on_query(window, cx);
+    }
+
+    /// Enter or click on a result: settings jump to their row (flash, scroll, focus a field);
+    /// actions run; history copies; the rest open their page.
+    fn open(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(hit) = self.hits.get(i).cloned() else { return };
+        let id = hit.id.as_str().unwrap_or("").to_string();
+        match hit.kind.as_str() {
+            "history" => {
+                cx.write_to_clipboard(ClipboardItem::new_string(hit.title));
+                self.notify("Copied", None, Tone::Neutral, 1200, window, cx);
+                return;
+            }
+            "action" if id == "restart" => return self.restart(window, cx),
+            "action" => return self.request("POST", "test-sound", None, window, cx, |_, _: Result<Value, String>, _, _| {}),
+            _ => {}
+        }
+        self.clear_search(window, cx);
+        window.focus(&self.focus, cx);
+        if let Some(p) = PAGES.iter().position(|p| p.id == hit.page) {
+            self.nav(p, window, cx);
+        }
+        if hit.kind == "setting" {
+            self.flash = Some((id.clone(), Instant::now()));
+            self.target.set(None);
+            self.scroll_to = Some(id.clone());
+            if let Some(state) = self.inputs.get(&id) {
+                window.focus(&state.read(cx).focus_handle(cx), cx);
+            }
+        }
+        cx.notify();
+    }
+
+    /// After a search jump: once the target row has been laid out, glide it into view.
+    fn follow_scroll(&mut self, now: Instant) -> bool {
+        if self.scroll_to.is_some() {
+            if let Some(b) = self.target.take() {
+                let (view, off, max) = (self.scroll.bounds(), self.scroll.offset(), self.scroll.max_offset());
+                let want = f32::from(off.y - (b.top() - view.top() - px(96.)));
+                let want = want.clamp(-f32::from(max.y), 0.);
+                self.scroll_glide = Some(Glide { from: f32::from(off.y), to: want, at: now });
+                self.scroll_to = None;
+            } else if self.flash.as_ref().is_none_or(|(_, at)| now.saturating_duration_since(*at) > Duration::from_secs(1)) {
+                self.scroll_to = None; // row never showed up
+            }
+        }
+        if let Some(g) = &self.scroll_glide {
+            self.scroll.set_offset(point(px(0.), px(g.value(now, 320))));
+            if now.saturating_duration_since(g.at) > Duration::from_millis(340) {
+                self.scroll_glide = None;
+            }
+        }
+        self.scroll_to.is_some() || self.scroll_glide.is_some() || self.flash.as_ref().is_some_and(|(_, at)| now.saturating_duration_since(*at) < Duration::from_millis(1600))
     }
 
     /// Easter egg: tapping a keycap works like the real key. First tap latches it (start thock,
@@ -512,6 +716,8 @@ impl SettingsWindow {
         self.pill = Glide { from: self.pill.value(now, 260), to: i as f32 * 34.0, at: now };
         self.page_at = now;
         self.page = i;
+        self.scroll.set_offset(point(px(0.), px(0.)));
+        self.scroll_glide = None;
         // Elements on the old page never get their hover-out; keep only the sidebar's.
         self.hovered.retain(|k| k.starts_with("nav-"));
         self.load_page(window, cx);
@@ -519,9 +725,12 @@ impl SettingsWindow {
     }
 
     fn sidebar(&self, now: Instant, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let field = self.search_field(now, cx);
         let items = PAGES.iter().enumerate().map(|(i, p)| {
             let on = i == self.page;
             let key = SharedString::from(format!("nav-{i}"));
+            // How much the gliding pill covers this item: colours cross-fade as it passes.
+            let a = (1. - (self.pill.value(now, 260) - i as f32 * 34.).abs() / 34.).clamp(0., 1.);
             let t = if on { 0. } else { self.ring(&key, now) };
             div()
                 .id(("nav", i))
@@ -533,11 +742,11 @@ impl SettingsWindow {
                 .rounded(px(6.))
                 .text_size(px(13.))
                 .line_height(px(19.5))
-                .text_color(if on { n50() } else { blend(n500(), n50(), t) })
+                .text_color(blend(blend(n500(), n50(), t), n50(), a))
                 .bg(n900().opacity(0.6 * t))
                 .on_hover(self.hover(key, cx))
                 .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| this.nav(i, window, cx)))
-                .child(icon(p.icon, 16., if on { a400() } else { n600() }))
+                .child(icon(p.icon, 16., blend(n600(), a400(), a)))
                 .child(p.label)
         });
         let pill = div()
@@ -585,8 +794,9 @@ impl SettingsWindow {
                     .child(logo())
                     .child(text("speakit", 18., 18., n50()).font_weight(FontWeight::SEMIBOLD)),
             )
+            .child(field)
             .child(div().relative().child(pill).child(div().flex().flex_col().gap(px(2.)).children(items)))
-            .child(div().mt_auto().px(px(8.)).flex().flex_col().gap(px(6.)).children(lights))
+            .child(div().mt_auto().px(px(8.)).flex().flex_col().gap(px(6.)).children(self.toast.as_ref().map(|t| self.note(t, now))).children(lights))
             .child(self.credit(now, cx))
     }
 
@@ -601,7 +811,7 @@ impl SettingsWindow {
             .mb(px(20.))
             .child(text(p.label, 20., 25., n50()).font_weight(FontWeight::SEMIBOLD))
             .child(text(p.blurb, 13., 20., n500()).mt(px(2.)));
-        let banner = (self.needs_restart && self.page == MODEL).then(|| {
+        let banner = (self.needs_restart && self.page == MODEL && self.query.is_empty()).then(|| {
             div()
                 .mb(px(24.))
                 .px(px(16.))
@@ -613,20 +823,35 @@ impl SettingsWindow {
                 .bg(a950())
                 .shadow(vec![shadow(0., 0., 0., 1., a800(), false)])
                 .child(text("Restart speakit to use the new model settings.", 14., 20., a200()))
-                .child(primary_button("restart", Some("restart"), "Restart", self.ring("restart", now)).on_hover(self.hover("restart".into(), cx)).on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                    this.needs_restart = false;
-                    this.notify("Restarting speakit", None, Tone::Neutral, 2500, window, cx);
-                    this.request("POST", "restart", None, window, cx, |_, _: Result<Value, String>, _, _| {});
-                })))
+                .child(primary_button("restart", Some("restart"), "Restart", self.ring("restart", now)).on_hover(self.hover("restart".into(), cx)).on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.restart(window, cx))))
         });
         let mut body: Vec<AnyElement> = Vec::new();
-        if p.id == "general" {
+        let searching = !self.query.is_empty();
+        let header = if searching {
+            let blurb = match (self.hits.is_empty(), self.semantic) {
+                (true, _) => "Try other words: search matches meaning, not just spelling.",
+                (false, true) => "Arrow keys move, Enter opens, Esc closes.",
+                (false, false) => "Arrow keys move, Enter opens, Esc closes. Matching by keyword until the meaning model loads.",
+            };
+            div()
+                .relative()
+                .top(px(6. * (1. - h)))
+                .opacity(h)
+                .mb(px(20.))
+                .child(text("Search", 20., 25., n50()).font_weight(FontWeight::SEMIBOLD))
+                .child(text(blurb, 13., 20., n500()).mt(px(2.)))
+        } else {
+            header
+        };
+        if searching {
+            body.push(self.results(now, cx).into_any_element());
+        } else if p.id == "general" {
             body.push(self.keys(cx).into_any_element());
         }
-        for sec in p.sections {
+        for sec in p.sections.iter().filter(|_| !searching) {
             body.push(self.section(sec, window, cx).into_any_element());
         }
-        match self.page {
+        match if searching { usize::MAX } else { self.page } {
             2 => body.push(group(Some("Tone by app"), None, TONES.iter().map(|(l, h)| row(*l, *h, None).into_any_element()).collect()).into_any_element()),
             WORDS => body.extend(self.words_page(cx)),
             HISTORY => {
@@ -635,34 +860,59 @@ impl SettingsWindow {
             }
             _ => {}
         }
+        // Our own scroll handle (not overflow_y_scrollbar's) so a search jump can scroll to its row.
+        let inner = div()
+            .px(px(24.))
+            .pt(px(20.))
+            .pb(px(32.))
+            .child(header)
+            .children(banner)
+            .child(div().relative().top(px(6. * (1. - b))).opacity(b).flex().flex_col().gap(px(20.)).children(body));
         div()
-            // Keyed by page, so each page opens scrolled to the top.
-            .id(("content", self.page))
+            .id("content")
             .flex_1()
             .h_full()
             .min_w_0()
-            .overflow_y_scrollbar()
-            .child(
-                div()
-                    .px(px(24.))
-                    .pt(px(20.))
-                    .pb(px(32.))
-                    .child(header)
-                    .children(banner)
-                    .child(div().relative().top(px(6. * (1. - b))).opacity(b).flex().flex_col().gap(px(20.)).children(body)),
-            )
+            .relative()
+            .child(div().id("content-area").size_full().overflow_y_scroll().track_scroll(&self.scroll).child(inner))
+            .vertical_scrollbar(&self.scroll)
     }
 
     fn section(&self, sec: &'static str, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let Some(s) = &self.settings else { return div() };
+        let count = s.schema.iter().filter(|x| x.section == sec).count();
         let rows = s
             .schema
             .iter()
             .filter(|x| x.section == sec)
-            .map(|x| {
+            .enumerate()
+            .map(|(i, x)| {
                 let locked = s.env.contains(&x.name);
                 let help = if locked { format!("Locked by SPEAKIT_{} in the environment.", x.name) } else { x.help.clone() };
-                row(x.label.clone(), help, Some(self.control(x, &s.values[&x.name], locked, window, cx))).into_any_element()
+                let r = row(x.label.clone(), help, Some(self.control(x, &s.values[&x.name], locked, window, cx)));
+                match &self.flash {
+                    // Search jump: an amber wash that holds, then fades; the canvas reports where the row is.
+                    Some((n, at)) if *n == x.name => {
+                        let f = 1. - progress(Instant::now(), *at, 700, 900);
+                        let cell = self.target.clone();
+                        div()
+                            .relative()
+                            .child(
+                                div()
+                                    .absolute()
+                                    .top_0()
+                                    .left_0()
+                                    .size_full()
+                                    .when(i == 0, |d| d.rounded_t(px(12.)))
+                                    .when(i + 1 == count, |d| d.rounded_b(px(12.)))
+                                    .bg(a500().opacity(0.08 * f)),
+                            )
+                            .child(canvas(move |b, _, _| cell.set(Some(b)), |_, _, _, _| {}).absolute().top_0().left_0().size_full())
+                            .child(r)
+                            .into_any_element()
+                    }
+                    _ => r.into_any_element(),
+                }
             })
             .collect();
         let (title, action) = match sec {
@@ -686,8 +936,9 @@ impl SettingsWindow {
         let name = s.name.clone();
         if s.default.is_boolean() {
             let on = value.as_bool().unwrap_or(false);
-            return toggle(SharedString::from(name.clone()), on, !locked)
-                .when(!locked, |d| d.on_click(cx.listener(move |this, _: &ClickEvent, window, cx| this.save(name.clone(), Value::Bool(!on), window, cx))))
+            let t = self.switches.get(&name).map_or(if on { 1. } else { 0. }, |g| g.value(Instant::now(), SWITCH_MS));
+            return toggle(SharedString::from(name.clone()), t, !locked)
+                .when(!locked, |d| d.on_click(cx.listener(move |this, _: &ClickEvent, window, cx| this.flip(&name, window, cx))))
                 .into_any_element();
         }
         if let Some(state) = self.selects.get(&name) {
@@ -838,66 +1089,185 @@ impl SettingsWindow {
         group(None, None, rows.collect())
     }
 
-    fn toast(&self, t: &Toast, now: Instant, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let (bg, fg, ic) = match t.tone {
-            Tone::Success => (gpui::rgba(0x3d630080).into(), gpui::rgb(0xbbf451).into(), "success"),
-            Tone::Error => (gpui::rgba(0xa5003680).into(), gpui::rgb(0xffa1ad).into(), "error"),
-            Tone::Neutral => (n700(), n500(), "bell"),
-        };
-        let left = (1. - now.saturating_duration_since(t.at).as_secs_f32() / t.duration.as_secs_f32()).clamp(0., 1.);
-        div()
-            .absolute()
-            .right(px(24.))
-            .bottom(px(24.))
-            .w(px(400.))
+    /// The sidebar search box: a field like the settings fields (n800 ring on hover, n600 on focus).
+    fn search_field(&self, now: Instant, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let l = self.ring("search", now);
+        let empty = self.search.read(cx).value().is_empty();
+        let mut ring = vec![shadow(0., 0., 0., 1., white(0.05), false)];
+        if l > 0.001 {
+            ring.push(shadow(0., 0., 0., 2., blend(n500(), n600(), (l - 1.).clamp(0., 1.)).opacity(l.min(1.)), false));
+        }
+        let kbd = div()
+            .h(px(18.))
+            .px(px(5.))
             .flex()
-            .items_start()
-            .gap(px(12.))
-            .p(px(16.))
-            .pr(px(44.))
-            .rounded(px(16.))
+            .items_center()
+            .rounded(px(4.))
             .border_1()
             .border_color(n700())
-            .bg(n800())
-            .shadow(vec![shadow(0., 4., 12., 0., black(0.25), false)])
-            .overflow_hidden()
-            .child(div().size(px(40.)).flex_shrink_0().rounded_full().flex().items_center().justify_center().bg::<gpui::Hsla>(bg).child(icon(ic, 20., fg)))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.))
-                    .child(text(t.title.clone(), 14., 20., n50()).font_weight(FontWeight::MEDIUM))
-                    .children(t.description.clone().map(|d| text(d, 14., 20., n500()))),
-            )
-            .child(
-                div()
-                    .id("toast-close")
-                    .absolute()
-                    .top(px(12.))
-                    .right(px(12.))
-                    .size(px(24.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(6.))
-                    .bg(n700().opacity(self.ring("toast-close", now)))
-                    .on_hover(self.hover("toast-close".into(), cx))
-                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                        this.toast = None;
-                        cx.notify();
-                    }))
-                    .child(icon("close", 16., n500())),
-            )
-            .child(div().absolute().left_0().bottom_0().h(px(3.)).w(px(398. * left)).bg(a600()))
+            .opacity(1. - (l - 1.).clamp(0., 1.))
+            .child(text("Ctrl K", 11., 16., n600()));
+        div()
+            .id("search-field")
+            .h(px(32.))
+            .mb(px(12.))
+            .pl(px(8.))
+            .pr(px(6.))
+            .flex()
+            .items_center()
+            .rounded(px(8.))
+            .bg(n900())
+            .shadow(ring)
+            .text_size(px(13.))
+            .on_hover(self.hover("search".into(), cx))
+            .capture_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| this.search_key(e, window, cx)))
+            .child(icon("search", 16., n600()))
+            .child(div().flex_1().min_w_0().child(Input::new(&self.search).appearance(false)))
+            .when(empty, |d| d.child(kbd))
+    }
+
+    /// Search results: one card of fixed-height rows; a pill glides to the selected one.
+    fn results(&self, now: Instant, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        if self.hits.is_empty() {
+            let empty = div().py(px(40.)).px(px(16.)).flex().justify_center().child(text(format!("Nothing matches \u{201c}{}\u{201d}.", self.query), 14., 20., n600()));
+            return card().child(empty);
+        }
+        // overflow_hidden clips square, so the pill rounds itself: the card's 12px corners at the
+        // first/last row, eased as it glides (an only row gets all four).
+        let y = self.sel_glide.value(now, 180);
+        let last = (self.hits.len() - 1) as f32 * HIT_H;
+        let pill = div()
+            .absolute()
+            .top(px(y))
+            .left_0()
+            .right_0()
+            .h(px(HIT_H))
+            .rounded_t(px(12. * (1. - y / HIT_H).clamp(0., 1.)))
+            .rounded_b(px(12. * (1. - (last - y) / HIT_H).clamp(0., 1.)))
+            .bg(n800().opacity(0.7));
+        let locked = |name: &str| self.settings.as_ref().is_some_and(|s| s.env.iter().any(|e| e == name));
+        let rows = self.hits.iter().enumerate().map(|(i, h)| {
+            let page = PAGES.iter().find(|p| p.id == h.page);
+            let ic = match h.kind.as_str() {
+                "action" if h.id == "restart" => "restart",
+                "action" => "volume",
+                "help" => "keyboard",
+                "wordfix" => "book",
+                "history" => "history",
+                _ => page.map_or("settings", |p| p.icon),
+            };
+            let sub = match h.kind.as_str() {
+                "setting" => format!("{} \u{b7} {}", page.map_or("", |p| p.label), h.sub),
+                "history" => String::new(),
+                _ => h.sub.clone(),
+            };
+            let id = h.id.as_str().unwrap_or("").to_string();
+            let right: AnyElement = match h.kind.as_str() {
+                "setting" if h.switch => {
+                    let on = self.settings.as_ref().and_then(|s| s.values.get(&id)).and_then(Value::as_bool).unwrap_or(false);
+                    let t = self.switches.get(&id).map_or(if on { 1. } else { 0. }, |g| g.value(now, SWITCH_MS));
+                    let can = !locked(&id);
+                    toggle(("hit-switch", i), t, can)
+                        .when(can, |d| {
+                            d.on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                cx.stop_propagation();
+                                this.flip(&id, window, cx);
+                            }))
+                        })
+                        .into_any_element()
+                }
+                "setting" => {
+                    let v = self.settings.as_ref().and_then(|s| s.values.get(&id)).map(display).unwrap_or_default();
+                    let v = if !v.is_empty() {
+                        v
+                    } else if id == "MIC_TARGET" {
+                        "System default".into()
+                    } else if id == "QUANTIZATION" {
+                        "Full precision".into()
+                    } else {
+                        "Not set".into()
+                    };
+                    text(v, 12., 16., n500()).max_w(px(200.)).truncate().into_any_element()
+                }
+                "history" => {
+                    let when = h.time.map(clock).unwrap_or_default();
+                    let meta = if h.app.is_empty() { when } else { format!("{} \u{b7} {when}", h.app) };
+                    text(meta, 12., 16., n600()).into_any_element()
+                }
+                k => text(
+                    match k {
+                        "page" => "Page",
+                        "action" => "Action",
+                        "help" => "Help",
+                        _ => "Word fix",
+                    },
+                    12.,
+                    16.,
+                    n600(),
+                )
+                .into_any_element(),
+            };
+            let title = text(h.title.clone(), 13., 20., n50()).truncate();
+            div()
+                .id(("hit", i))
+                .relative()
+                .h(px(HIT_H))
+                .px(px(14.))
+                .flex()
+                .items_center()
+                .gap(px(12.))
+                .cursor_pointer()
+                .on_hover(cx.listener(move |this, on: &bool, _, cx| {
+                    if *on {
+                        this.select(i, cx)
+                    }
+                }))
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| this.open(i, window, cx)))
+                .when(i > 0, |d| d.child(div().absolute().top_0().left(px(14.)).right_0().h(px(1.)).bg(white(0.06))))
+                .child(div().size(px(28.)).flex_shrink_0().flex().items_center().justify_center().rounded(px(8.)).bg(n800()).child(icon(ic, 16., if i == self.sel { a400() } else { n500() })))
+                .child(div().flex_1().min_w_0().child(title).when(!sub.is_empty(), |d| d.child(text(sub, 12., 16., n600()).truncate())))
+                .child(div().flex_shrink_0().child(right))
+        });
+        card().relative().overflow_hidden().child(pill).children(rows)
+    }
+
+    /// Save/copy/error feedback: a quiet line above the status lights that fades in and out.
+    fn note(&self, t: &Toast, now: Instant) -> impl IntoElement + use<> {
+        let color = match t.tone {
+            Tone::Success => green(),
+            Tone::Error => red(),
+            Tone::Neutral => n500(),
+        };
+        let fade_in = progress(now, t.at, 0, 180);
+        let fade_out = 1. - progress(now, t.at + t.duration.saturating_sub(Duration::from_millis(250)), 0, 250);
+        let o = fade_in * fade_out;
+        div()
+            .relative()
+            .top(px(4. * (1. - fade_in)))
+            .opacity(o)
+            .mb(px(6.))
+            .child(div().flex().items_center().gap(px(8.)).child(div().size(px(16.)).flex().items_center().justify_center().child(dot(color))).child(text(t.title.clone(), 12., 18., n50())))
+            .children(t.description.clone().map(|d| text(d, 11.5, 16., n600()).pl(px(24.))))
     }
 }
 
 impl Render for SettingsWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let root = div().size_full().relative().flex().bg(n925()).font_family(FONT).text_color(n50());
+        if window.focused(cx).is_none() {
+            window.focus(&self.focus, cx);
+        }
+        let root = div()
+            .size_full()
+            .relative()
+            .flex()
+            .bg(n925())
+            .font_family(FONT)
+            .text_color(n50())
+            .track_focus(&self.focus)
+            .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
+                window.focus(&this.search.read(cx).focus_handle(cx), cx);
+                cx.notify();
+            }));
         if self.down {
             let msg = div()
                 .flex()
@@ -914,11 +1284,11 @@ impl Render for SettingsWindow {
         let now = Instant::now();
         let busy = |at: Instant| now.saturating_duration_since(at) < Duration::from_millis(360);
         let keys_busy = self.key_at.iter().any(|&at| busy(at));
-        if self.retarget(now, window, cx) || keys_busy || busy(self.pill.at) || busy(self.page_at) || self.toast.is_some() {
+        let following = self.follow_scroll(now);
+        if self.retarget(now, window, cx) || keys_busy || following || busy(self.pill.at) || busy(self.page_at) || busy(self.sel_glide.at) || self.toast.is_some() {
             window.request_animation_frame();
         }
-        let toast = self.toast.as_ref().map(|t| self.toast(t, now, cx));
-        root.child(self.sidebar(now, cx)).child(self.content(now, window, cx)).children(toast)
+        root.child(self.sidebar(now, cx)).child(self.content(now, window, cx))
     }
 }
 
@@ -929,6 +1299,11 @@ fn display(v: &Value) -> String {
         Some(f) => format!("{f:.2}").trim_end_matches('0').trim_end_matches('.').to_string(),
         None => v.as_str().unwrap_or("").to_string(),
     }
+}
+
+/// Percent-encodes a query string value.
+fn urlencode(s: &str) -> String {
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
 }
 
 /// Local wall-clock time like "12:05 AM".
@@ -966,6 +1341,7 @@ fn main() {
     gpui_platform::application().with_assets(Assets).run(|cx: &mut App| {
         gpui_component::init(cx);
         theme::init(cx);
+        cx.bind_keys([gpui::KeyBinding::new("ctrl-k", FocusSearch, None), gpui::KeyBinding::new("ctrl-f", FocusSearch, None)]);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(gpui::Bounds::centered(None, size(px(1100.), px(860.)), cx))),
             window_min_size: Some(size(px(1000.), px(860.))),

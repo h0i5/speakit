@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 from . import config as cfg
 from . import desktop as dk
 from . import history as hist
+from . import search as srch
 
 if TYPE_CHECKING:
     from .daemon import Daemon
@@ -33,7 +34,20 @@ def _llm_up() -> bool:
         return False
 
 
+def _search_inputs(daemon: "Daemon") -> tuple[list[dict], str]:
+    try:
+        fixes = cfg.REPLACEMENTS_PATH.read_text()
+    except OSError:
+        fixes = ""
+    return (hist.load() if cfg.SAVE_HISTORY else list(daemon.history)), fixes
+
+
 def serve(daemon: "Daemon") -> None:
+    def warm() -> None:  # load the embedding model, then embed everything once
+        srch.embedder.load()
+        if srch.embedder.ready:
+            srch.search("warm up", *_search_inputs(daemon))
+    threading.Thread(target=warm, daemon=True).start()
     token = secrets.token_urlsafe(24)
     fd = os.open(cfg.UI_TOKEN_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
@@ -91,6 +105,10 @@ def serve(daemon: "Daemon") -> None:
                 return self._json({"text": text, "path": str(cfg.REPLACEMENTS_PATH)})
             if p == "/api/history":
                 return self._json(list(reversed(daemon.history)))
+            if p == "/api/search":
+                from urllib.parse import parse_qs, urlsplit
+                q = parse_qs(urlsplit(self.path).query).get("q", [""])[0][:200]
+                return self._json({"results": srch.search(q, *_search_inputs(daemon)), "semantic": srch.embedder.ready})
             if p == "/api/stats":
                 return self._json(hist.stats(hist.load() if cfg.SAVE_HISTORY else list(daemon.history)))
             if p.startswith("/api/"):

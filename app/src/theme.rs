@@ -37,7 +37,7 @@ macro_rules! files {
     };
 }
 const FILES: &[(&str, &[u8])] =
-    files!("settings", "keyboard", "sparkling", "book", "history", "cpu", "volume", "copy", "restart", "plus", "minus", "success", "error", "bell", "close");
+    files!("settings", "keyboard", "sparkling", "book", "history", "cpu", "volume", "copy", "restart", "plus", "minus", "success", "error", "bell", "close", "search");
 
 /// Our SVGs (Remix icons, the logo) first, then gpui-component's own icons.
 pub struct Assets;

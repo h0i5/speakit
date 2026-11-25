@@ -53,24 +53,45 @@ def _call(msg):
         return None
 
 
-def mpris(action: str, names: list[str] | None = None) -> list[str]:
-    """action "pause": pause every Playing player, return their bus names.
-    action "play": resume the given players."""
+FADE_STEPS = 12
+
+
+def _fade(players: list, start: float, end: float, seconds: float) -> None:
+    """Ramp each player's MPRIS Volume from start to end (fractions of its own level).
+    Players that don't take Volume writes (Firefox, some browsers) just stay put."""
+    from jeepney import Properties
+    for i in range(1, FADE_STEPS + 1):
+        for addr, vol in players:
+            if vol:
+                _call(Properties(addr).set("Volume", "d", vol * (start + (end - start) * i / FADE_STEPS)))
+        time.sleep(seconds / FADE_STEPS)
+
+
+def mpris(action: str, players: list | None = None, fade: float = 0.3) -> list:
+    """action "pause": fade out and pause every Playing player; return
+    [(address, volume)] for "play", which fades them back in.
+    Blocking for `fade` seconds: call it off the main thread."""
     from jeepney import DBusAddress, Properties, new_method_call
     from jeepney.bus_messages import message_bus
-    if names is None:
-        listed = _call(message_bus.ListNames()) or ([],)
-        names = [n for n in listed[0] if n.startswith("org.mpris.MediaPlayer2.")]
-    done = []
-    for n in names:
+    if action == "play":
+        players = [p for p in players or [] if _call(new_method_call(p[0], "Play")) is not None]
+        _fade(players, 0.0, 1.0, fade)
+        return players
+    listed = _call(message_bus.ListNames()) or ([],)
+    players = []
+    for n in listed[0]:
+        if not n.startswith("org.mpris.MediaPlayer2."):
+            continue
         addr = DBusAddress("/org/mpris/MediaPlayer2", bus_name=n, interface="org.mpris.MediaPlayer2.Player")
-        if action == "pause":
-            st = _call(Properties(addr).get("PlaybackStatus"))
-            if not st or st[0][1] != "Playing":
-                continue
-        if _call(new_method_call(addr, "Pause" if action == "pause" else "Play")) is not None:
-            done.append(n)
-    return done
+        st = _call(Properties(addr).get("PlaybackStatus"))
+        if st and st[0][1] == "Playing":
+            vol = _call(Properties(addr).get("Volume"))
+            players.append((addr, vol[0][1] if vol else None))
+    _fade(players, 1.0, 0.0, fade)
+    # Volume stays at 0 while paused: players pause asynchronously, so restoring it
+    # here plays a blip of buffered audio at full level. The resume fade restores it.
+    # ponytail: a crash mid-recording leaves the player at 0; restore on startup if that bites.
+    return [p for p in players if _call(new_method_call(p[0], "Pause")) is not None]
 
 
 # --- waybar signal ----------------------------------------------------------------

@@ -46,7 +46,7 @@ pub fn group(title: Option<&'static str>, action: Option<AnyElement>, rows: Vec<
     let rows = rows.into_iter().enumerate().map(|(i, r)| {
         div().relative().child(r).when(i > 0, |d| d.child(div().absolute().top_0().left(px(14.)).right_0().h(px(1.)).bg(white(0.06))))
     });
-    let card = card().flex().flex_col().children(rows);
+    let card = card().overflow_hidden().flex().flex_col().children(rows);
     if title.is_none() && action.is_none() {
         return card;
     }
@@ -77,15 +77,19 @@ pub fn row(label: impl Into<SharedString>, help: impl Into<SharedString>, contro
 }
 
 /// BoardUI's md pill switch: amber gradient when on, a white thumb with a chip.
-pub fn toggle(id: impl Into<ElementId>, on: bool, enabled: bool) -> Stateful<Div> {
+/// `t` runs 0 (off) to 1 (on), so the thumb slides and the colours cross-fade.
+pub fn toggle(id: impl Into<ElementId>, t: f32, enabled: bool) -> Stateful<Div> {
     let dim = |c: Hsla| if enabled { c } else { c.opacity(0.5) };
-    let chip = div().size(px(7.5)).rounded_full().border(px(0.5)).map(|d| {
-        if on { d.bg(vgrad(a600(), a500())).border_color(a600()) } else { d.bg(n800()).border_color(n700().opacity(0.5)) }
-    });
+    let chip = div()
+        .size(px(7.5))
+        .rounded_full()
+        .border(px(0.5))
+        .bg(vgrad(blend(n800(), a600(), t), blend(n800(), a500(), t)))
+        .border_color(blend(n700().opacity(0.5), a600(), t));
     let thumb = div()
         .absolute()
         .top(px(3.))
-        .left(px(if on { 21. } else { 3. }))
+        .left(px(3. + 18. * t))
         .size(px(18.))
         .rounded_full()
         .flex()
@@ -100,14 +104,8 @@ pub fn toggle(id: impl Into<ElementId>, on: bool, enabled: bool) -> Stateful<Div
         .w(px(42.))
         .h(px(24.))
         .rounded_full()
-        .map(|d| {
-            if on {
-                d.bg(vgrad(dim(a500()), dim(a600())))
-                    .shadow(vec![shadow(0., 1.5, 0., 0., white(0.25), true), shadow(0., 0., 0., 0.75, a500(), true)])
-            } else {
-                d.bg(dim(n800()))
-            }
-        })
+        .bg(vgrad(dim(blend(n800(), a500(), t)), dim(blend(n800(), a600(), t))))
+        .when(t > 0.001, |d| d.shadow(vec![shadow(0., 1.5, 0., 0., white(0.25 * t), true), shadow(0., 0., 0., 0.75, a500().opacity(t), true)]))
         .child(thumb)
 }
 

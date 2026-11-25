@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
 import time
 import wave
 from pathlib import Path
@@ -95,14 +96,33 @@ def is_editor(cls: str) -> bool:
 
 
 # --- media ----------------------------------------------------------------------
-def pause_media() -> list[str]:
-    """Pause every MPRIS player that is playing; return their names to resume."""
-    return nv.mpris("pause")
+_media: threading.Thread | None = None  # the last fade; each waits for the one before
 
 
-def resume_media(players: list[str]) -> None:
-    if players:
-        nv.mpris("play", players)
+def _media_job(fn) -> None:
+    global _media
+    prev = _media
+
+    def run() -> None:
+        if prev:
+            prev.join()
+        fn()
+
+    _media = threading.Thread(target=run, daemon=True)
+    _media.start()
+
+
+def pause_media(fade: float) -> list:
+    """Fade out and pause every playing MPRIS player in the background (recording
+    starts at once); the returned list fills in with what to resume."""
+    players: list = []
+    _media_job(lambda: players.extend(nv.mpris("pause", fade=fade)))
+    return players
+
+
+def resume_media(players: list, fade: float) -> None:
+    """Fade the paused players back in, after the pause fade if it's still running."""
+    _media_job(lambda: players and nv.mpris("play", players, fade))
 
 
 # --- cue sounds -----------------------------------------------------------------
