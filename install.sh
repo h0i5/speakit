@@ -113,6 +113,8 @@ cat <<EOF
    bindr = , End, exec, $HOME/.local/bin/speakit-toggle release
 
    End = command mode: select text, say what to do with it.
+   Esc cancels a recording, or right after a cleanup reverts to the raw text
+   (speakit binds it only for those moments; no config line needed).
 
    (services autostart via systemd; no exec-once needed)
 

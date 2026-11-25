@@ -17,12 +17,14 @@ import sys
 import threading
 import time
 from collections import deque
+from pathlib import Path
 
 from . import config as cfg
 from . import desktop as dk
+from . import history as hist
 from . import native as nv
 from .polish import app_style, command, polish
-from .text import ascii_fold, clean, load_replacements, replace
+from .text import ascii_fold, clean, file_paths, load_replacements, replace
 
 # Logic states.
 IDLE = "idle"
@@ -53,6 +55,22 @@ def notify(summary: str, body: str = "", *, urgency: str = "low") -> None:
         pass
 
 
+CLIENT = Path.home() / ".local" / "bin" / "speakit-toggle"
+
+
+def bind_escape(action: str | None) -> None:
+    """Escape runs `speakit-toggle <action>` (cancel while recording, raw right
+    after a cleanup); None gives Escape back to apps. Bound only for those
+    moments, so Escape works normally the rest of the time.
+    ponytail: unbind drops every bare-Escape bind, fine while hyprland.conf has none."""
+    try:
+        nv.hypr("/keyword unbind , Escape")
+        if action:
+            nv.hypr(f"/keyword bind , Escape, exec, {CLIENT} {action}")
+    except (OSError, StopIteration) as e:
+        log(f"escape bind failed: {e}")
+
+
 def set_state(state: str) -> None:
     """Persist state for waybar + poke waybar to refresh immediately."""
     try:
@@ -80,8 +98,11 @@ class Daemon:
             dk.kb()  # create the virtual keyboard now, not on first dictation
         except OSError as e:
             log(f"no /dev/uinput access ({e}); typing will fail. Re-run install.sh.")
-        # Recent dictations for the settings UI (memory only, never on disk).
-        self.history: deque[dict] = deque(maxlen=50)
+        # Recent dictations for the settings UI (also on disk if cfg.SAVE_HISTORY).
+        self.history: deque[dict] = deque(hist.load()[-50:] if cfg.SAVE_HISTORY else [], maxlen=50)
+        self.rec_secs = 0.0
+        # (chars, terminal) of the last cleanup typed, so Escape can swap in the raw text.
+        self.typed: tuple[int, bool] | None = None
         # Socket handler and the auto-stop timer thread both drive state.
         self.lock = threading.Lock()
 
@@ -94,6 +115,8 @@ class Daemon:
         def clear() -> None:
             # Only clear if nothing newer (a new recording) happened since.
             if gen == self._display_gen and self.state == IDLE:
+                self.typed = None
+                bind_escape(None)  # the revert window is over
                 set_state(IDLE)
 
         threading.Timer(cfg.DONE_TICK_SECONDS, clear).start()
@@ -120,6 +143,8 @@ class Daemon:
         self.rec_started = started = time.monotonic()
         self.state = RECORDING
         self._display_gen += 1  # invalidate any pending done-tick timer
+        self.typed = None
+        bind_escape("cancel")
         set_state({"clean": RECORDING_POLISH, "command": RECORDING_COMMAND}.get(self.mode, RECORDING))
         if cfg.SOUNDS:
             dk.play(cfg.SOUND_START or self.cues[0])
@@ -139,6 +164,7 @@ class Daemon:
         """Stop recorder cleanly and return the WAV path (empty on failure)."""
         proc, self.rec_proc = self.rec_proc, None
         self.state = IDLE
+        bind_escape(None)
         if proc is None:
             set_state(IDLE)
             return ""
@@ -154,22 +180,61 @@ class Daemon:
             dk.play(cfg.SOUND_STOP or self.cues[1])
         dk.resume_media(self.paused)
         self.paused = []
-        dur = time.monotonic() - self.rec_started
+        self.rec_secs = dur = time.monotonic() - self.rec_started
         log(f"recording stopped ({dur:.1f}s)")
         if not cfg.WAV_PATH.exists() or cfg.WAV_PATH.stat().st_size < 1024:
             return ""
         return str(cfg.WAV_PATH)
 
+    def cancel(self) -> str:
+        """Drop the running recording: nothing is transcribed or typed."""
+        proc, self.rec_proc = self.rec_proc, None
+        self.state = IDLE
+        bind_escape(None)
+        if proc is not None:
+            proc.kill()
+            proc.wait()
+        dk.resume_media(self.paused)
+        self.paused = []
+        set_state(IDLE)
+        if cfg.SOUNDS:
+            dk.play(cfg.SOUND_STOP or self.cues[1])
+        log("recording cancelled")
+        return "cancelled"
+
+    def revert(self) -> str:
+        """Replace the cleanup just typed with the raw transcript (Escape while
+        the done tick shows). Backspaces over it, so the cursor must not have moved."""
+        last = self.history[-1] if self.history else {}
+        typed, self.typed = self.typed, None
+        bind_escape(None)
+        if not typed or "raw" not in last:
+            return "nothing"
+        n, terminal = typed
+        try:
+            for _ in range(n):
+                dk.kb().combo(dk.BACKSPACE)
+        except OSError as e:
+            log(f"revert failed: {e}")
+            return "error"
+        self.inject(last["raw"], terminal)
+        last["text"], last["mode"] = last.pop("raw"), "raw"
+        log("reverted to raw transcript")
+        return "reverted"
+
     # --- transcribe + inject ----------------------------------------------
-    def transcribe(self, wav: str) -> str:
+    def transcribe(self, wav: str, files: list[str]) -> str:
         t0 = time.monotonic()
         text = clean(self.model.recognize(wav))
         if text:
             text = replace(text, load_replacements(cfg.REPLACEMENTS_PATH))
+            # Spoken file names -> paths of the terminal's repo.
+            text = file_paths(text, files)
         log(f"transcribed in {time.monotonic() - t0:.2f}s: {text!r}")
         return text
 
-    def inject(self, text: str, terminal: bool, trailing: str = " ") -> None:
+    def inject(self, text: str, terminal: bool, trailing: str = " ") -> int:
+        """Types or pastes text; returns how many characters landed."""
         # Trailing space so back-to-back dictations don't run together.
         text += trailing
         if len(text) >= cfg.PASTE_MIN_CHARS or not text.isascii():
@@ -177,8 +242,9 @@ class Daemon:
             # newlines as newlines; pasting never triggers "send").
             # Non-ASCII (accents, other scripts): ydotool can't type it.
             dk.paste(text, terminal)
-            return
-        lines = ascii_fold(text).split("\n")
+            return len(text)
+        text = ascii_fold(text)
+        lines = text.split("\n")
         try:
             for i, line in enumerate(lines):
                 if i:
@@ -190,6 +256,8 @@ class Daemon:
         except OSError as e:
             notify("speakit error", "can't type: no /dev/uinput access", urgency="critical")
             log(f"typing failed: {e}")
+            return 0
+        return len(text)
 
     # --- command handling --------------------------------------------------
     def toggle(self) -> str:
@@ -205,15 +273,16 @@ class Daemon:
             set_state(IDLE)
             notify("speakit", "no audio captured")
             return "empty"
+        cls, title, pid = dk.active_window()
+        terminal = dk.is_terminal(cls)
         try:
-            text = self.transcribe(wav)
+            text = self.transcribe(wav, dk.repo_files(dk.terminal_cwd(pid)) if terminal else [])
         except Exception as e:  # never let one bad clip kill the daemon
             set_state(IDLE)
             notify("speakit error", f"transcribe failed: {e}", urgency="critical")
             log(f"transcribe error: {e}")
             return "error"
-        cls, title = dk.active_window()
-        terminal = dk.is_terminal(cls)
+        raw = text
         style = app_style(cls, title, terminal)
         trailing = " "
         if text and self.mode == "clean":
@@ -232,8 +301,18 @@ class Daemon:
             set_state(IDLE)
             notify("speakit", "no speech detected")
             return "empty"
-        self.inject(text, terminal, trailing)
-        self.history.append({"time": time.time(), "mode": self.mode, "app": cls, "text": text})
+        typed = self.inject(text, terminal, trailing)
+        entry = {"time": time.time(), "mode": self.mode, "app": cls, "text": text, "secs": round(self.rec_secs, 1)}
+        if self.mode == "clean" and raw != text:
+            entry["raw"] = raw
+            self.typed = (typed, terminal)
+            bind_escape("raw")  # until the done tick clears
+        self.history.append(entry)
+        if cfg.SAVE_HISTORY:
+            try:
+                hist.append(entry)
+            except OSError as e:
+                log(f"history save failed: {e}")
         notify("✓ Transcription done")
         self.flash_done()
         return "typed"
@@ -247,6 +326,10 @@ class Daemon:
             return self.toggle()
         if cmd == "status":
             return self.state
+        if cmd == "cancel":
+            return self.cancel() if self.state == RECORDING else self.state
+        if cmd == "raw":
+            return self.revert()
         if cmd == "press":
             if self.state != RECORDING:  # stopping keeps the recording's mode
                 self.mode = "raw"
@@ -307,6 +390,7 @@ class Daemon:
         os.chmod(cfg.SOCKET_PATH, 0o600)
         srv.listen(8)
         set_state(IDLE)
+        bind_escape(None)  # a crash may have left it bound
         self._install_signal_handlers(srv)
         log(f"listening on {cfg.SOCKET_PATH}")
 
@@ -341,6 +425,7 @@ class Daemon:
             log("shutting down")
             if self.rec_proc is not None:
                 self.rec_proc.send_signal(signal.SIGINT)
+            bind_escape(None)
             try:
                 srv.close()
             finally:

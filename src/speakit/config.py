@@ -80,6 +80,9 @@ SETTINGS = [
     Setting("NOTIFY", "feedback", False, "Desktop notifications", "The waybar indicator usually covers it."),
     Setting("DONE_TICK_SECONDS", "feedback", 2.0, "Done tick duration (seconds)",
             "How long the tick stays in waybar after text is typed.", min=0.5, max=10),
+    Setting("SAVE_HISTORY", "history", True, "Keep history on disk",
+            "Saves dictations to ~/.local/share/speakit/history.jsonl for the History page and stats. "
+            "Off = last 50 in memory only."),
     Setting("WAYBAR_SIGNAL", "feedback", 8, "Waybar signal", "Must match \"signal\" in the waybar module.",
             min=1, max=30),
     # --- speech model
@@ -181,6 +184,8 @@ MODEL_DIR = Path(
 )
 # `wrong => right` per line, applied to every transcript (re-read each dictation).
 REPLACEMENTS_PATH = Path(os.environ.get("SPEAKIT_REPLACEMENTS") or CONFIG_DIR / "replacements.txt")
+# One JSON object per dictation (cfg.SAVE_HISTORY), read back for history + stats.
+HISTORY_PATH = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "speakit" / "history.jsonl"
 SOUND_START = os.environ.get("SPEAKIT_SOUND_START", "")
 SOUND_STOP = os.environ.get("SPEAKIT_SOUND_STOP", "")
 

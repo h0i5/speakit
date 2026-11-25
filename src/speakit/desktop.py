@@ -1,6 +1,7 @@
 """Desktop glue: media pause, cue sounds, focused window, clipboard paste/copy."""
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 import wave
@@ -12,7 +13,7 @@ TERMINALS = {"kitty", "foot", "alacritty", "wezterm", "org.wezfurlong.wezterm",
              "ghostty", "com.mitchellh.ghostty", "konsole", "xterm"}
 
 # Linux input keycodes.
-CTRL, SHIFT, C, V = 29, 42, 46, 47
+CTRL, SHIFT, C, V, BACKSPACE = 29, 42, 46, 47, 14
 _kb: nv.Keyboard | None = None
 
 
@@ -37,10 +38,48 @@ def _copy(data: bytes, mime: str = "text/plain;charset=utf-8") -> None:
 
 
 # --- focused window ------------------------------------------------------------
-def active_window() -> tuple[str, str]:
-    """(class, title) of the focused window, lowercased; empty if unknown."""
+def active_window() -> tuple[str, str, int]:
+    """(class, title, pid) of the focused window; class/title lowercased, empty/0 if unknown."""
     w = nv.active_window()
-    return str(w.get("class", "")).lower(), str(w.get("title", "")).lower()
+    return str(w.get("class", "")).lower(), str(w.get("title", "")).lower(), int(w.get("pid") or 0)
+
+
+def terminal_cwd(pid: int) -> str:
+    """Working directory of the foreground job in a terminal window (Claude
+    Code, vim, or the shell itself); "" if unknown. The window's pid is the
+    terminal; its session-leading child is the shell, and the shell's tty
+    foreground process group is the job.
+    ponytail: first shell wins, so a terminal with tabs (or one process for all
+    windows) may pick another tab's directory; ask the terminal (kitty @ ls) if that bites."""
+    if pid <= 0:
+        return ""
+    for p in Path("/proc").iterdir():
+        if not p.name.isdigit():
+            continue
+        try:
+            # Fields after "(comm)": state ppid pgrp session tty_nr tpgid
+            f = (p / "stat").read_text().rsplit(")", 1)[1].split()
+            if int(f[1]) != pid or int(f[3]) != int(p.name):
+                continue
+        except (OSError, ValueError, IndexError):
+            continue
+        for job in (f[5], p.name):  # the foreground job, else the shell
+            try:
+                return os.readlink(f"/proc/{job}/cwd")
+            except OSError:
+                pass
+    return ""
+
+
+def repo_files(cwd: str) -> list[str]:
+    """Tracked files under cwd, relative to it; [] outside a git repo."""
+    if not cwd:
+        return []
+    try:
+        r = _run(["git", "-C", cwd, "ls-files"], text=True)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    return r.stdout.splitlines() if r.returncode == 0 else []
 
 
 def is_terminal(cls: str) -> bool:

@@ -43,6 +43,15 @@ pub struct Item {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct Stats {
+    pub dictations: u64,
+    pub words: u64,
+    pub today: u64,
+    pub wpm: u64,
+    pub minutes_saved: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct Saved {
     pub values: Map<String, Value>,
 }

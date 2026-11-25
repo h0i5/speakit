@@ -3,7 +3,7 @@ mod api;
 mod theme;
 mod widgets;
 
-use api::{Api, Item, Saved, Settings, Status, Words};
+use api::{Api, Item, Saved, Settings, Stats, Status, Words};
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, ClickEvent, ClipboardItem, Context, Entity, Focusable, FontWeight, SharedString, StyledText, Subscription, TextRun, Window, WindowBounds,
@@ -33,7 +33,7 @@ const PAGES: [Page; 6] = [
     Page { id: "typing", label: "Typing", icon: "keyboard", blurb: "How text reaches the focused window.", sections: &["typing"] },
     Page { id: "cleanup", label: "Cleanup", icon: "sparkling", blurb: "The local model behind Insert and End.", sections: &["cleanup"] },
     Page { id: "words", label: "Word fixes", icon: "book", blurb: "Names and jargon the speech model gets wrong.", sections: &[] },
-    Page { id: "history", label: "History", icon: "history", blurb: "Your last 50 dictations. Kept in memory, cleared on restart.", sections: &[] },
+    Page { id: "history", label: "History", icon: "history", blurb: "Your recent dictations, and what talking has saved you.", sections: &["history"] },
     Page { id: "model", label: "Speech model", icon: "cpu", blurb: "Changes here take effect after a restart.", sections: &["model"] },
 ];
 const WORDS: usize = 3;
@@ -130,6 +130,7 @@ struct SettingsWindow {
     selects: HashMap<String, Dropdown>,
     words: Option<Entity<TextareaState>>,
     history: Vec<Item>,
+    stats: Option<Stats>,
     needs_restart: bool,
     toast: Option<Toast>,
     pill: Glide,
@@ -158,6 +159,7 @@ impl SettingsWindow {
             selects: HashMap::new(),
             words: None,
             history: Vec::new(),
+            stats: None,
             needs_restart: false,
             toast: None,
             pill: Glide { from: 0.0, to: page as f32 * 34.0, at: past },
@@ -254,11 +256,16 @@ impl SettingsWindow {
                     None => this.words = Some(cx.new(|cx| TextareaState::new(window, cx).default_value(w.text))),
                 }
             }),
-            HISTORY => self.request("GET", "history", None, window, cx, |this, r: Result<Vec<Item>, String>, _, _| {
-                if let Ok(items) = r {
-                    this.history = items;
-                }
-            }),
+            HISTORY => {
+                self.request("GET", "history", None, window, cx, |this, r: Result<Vec<Item>, String>, _, _| {
+                    if let Ok(items) = r {
+                        this.history = items;
+                    }
+                });
+                self.request("GET", "stats", None, window, cx, |this, r: Result<Stats, String>, _, _| {
+                    this.stats = r.ok();
+                });
+            }
             _ => {}
         }
     }
@@ -472,16 +479,19 @@ impl SettingsWindow {
             .flex_col()
             .gap(px(8.))
             .child(div().flex().gap(px(8.)).children(cards))
-            .child(text("Tap to start and tap again to stop, or hold while you talk. Rebind in hyprland.conf.", 12., 18., n600()).px(px(14.)))
+            .child(text("Tap to start and tap again to stop, or hold while you talk. Esc cancels a recording, or undoes a cleanup right after. Rebind in hyprland.conf.", 12., 18., n600()).px(px(14.)))
     }
 
-    /// "Made by Harsh", bottom right; the name links to harshiyer.in.
+    /// "Made by Harsh" at the foot of the sidebar (which never scrolls, so it
+    /// can't sit on top of page content); the name links to harshiyer.in.
     fn credit(&self, now: Instant, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = self.ring("credit", now);
         div()
-            .absolute()
-            .right(px(24.))
-            .bottom(px(12.))
+            .mt(px(14.))
+            .pt(px(12.))
+            .px(px(8.))
+            .border_t_1()
+            .border_color(white(0.06))
             .flex()
             .gap(px(3.))
             .child(text("Made by", 12., 16., n600()))
@@ -577,6 +587,7 @@ impl SettingsWindow {
             )
             .child(div().relative().child(pill).child(div().flex().flex_col().gap(px(2.)).children(items)))
             .child(div().mt_auto().px(px(8.)).flex().flex_col().gap(px(6.)).children(lights))
+            .child(self.credit(now, cx))
     }
 
     fn content(&self, now: Instant, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -618,7 +629,10 @@ impl SettingsWindow {
         match self.page {
             2 => body.push(group(Some("Tone by app"), None, TONES.iter().map(|(l, h)| row(*l, *h, None).into_any_element()).collect()).into_any_element()),
             WORDS => body.extend(self.words_page(cx)),
-            HISTORY => body.push(self.history_page(cx).into_any_element()),
+            HISTORY => {
+                body.extend(self.stats_card());
+                body.push(self.history_page(cx).into_any_element());
+            }
             _ => {}
         }
         div()
@@ -662,6 +676,7 @@ impl SettingsWindow {
                 ),
             ),
             "feedback" => (Some("Feedback"), None),
+            "history" => (Some("Storage"), None),
             _ => (None, None),
         };
         group(title, action, rows)
@@ -759,6 +774,22 @@ impl SettingsWindow {
             .child(editor)
             .child(div().flex().justify_end().child(save));
         Some(group(None, None, vec![body.into_any_element()]).into_any_element())
+    }
+
+    /// Totals across saved history (Flow-style): words, speed, typing time saved.
+    fn stats_card(&self) -> Option<AnyElement> {
+        let s = self.stats.as_ref().filter(|s| s.dictations > 0)?;
+        let cell = |value: String, label: &'static str| {
+            div().flex_1().min_w_0().px(px(14.)).py(px(12.)).child(text(value, 20., 25., n50()).font_weight(FontWeight::SEMIBOLD)).child(text(label, 12., 16., n600()))
+        };
+        let saved = if s.minutes_saved >= 120 { format!("{}h", s.minutes_saved / 60) } else { format!("{}m", s.minutes_saved) };
+        let cells = div()
+            .flex()
+            .child(cell(s.words.to_string(), "words"))
+            .child(cell(s.today.to_string(), "today"))
+            .child(cell(s.wpm.to_string(), "words / min"))
+            .child(cell(saved, "saved vs typing"));
+        Some(group(None, None, vec![cells.into_any_element()]).into_any_element())
     }
 
     fn history_page(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -887,7 +918,7 @@ impl Render for SettingsWindow {
             window.request_animation_frame();
         }
         let toast = self.toast.as_ref().map(|t| self.toast(t, now, cx));
-        root.child(self.sidebar(now, cx)).child(self.content(now, window, cx)).child(self.credit(now, cx)).children(toast)
+        root.child(self.sidebar(now, cx)).child(self.content(now, window, cx)).children(toast)
     }
 }
 

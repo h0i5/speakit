@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 from . import config as cfg
 from . import desktop as dk
+from . import history as hist
 
 if TYPE_CHECKING:
     from .daemon import Daemon
@@ -90,6 +91,8 @@ def serve(daemon: "Daemon") -> None:
                 return self._json({"text": text, "path": str(cfg.REPLACEMENTS_PATH)})
             if p == "/api/history":
                 return self._json(list(reversed(daemon.history)))
+            if p == "/api/stats":
+                return self._json(hist.stats(hist.load() if cfg.SAVE_HISTORY else list(daemon.history)))
             if p.startswith("/api/"):
                 return self._json({"error": "not found"}, 404)
             # Static UI (SPA: unknown paths serve index.html).

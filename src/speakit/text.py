@@ -50,7 +50,47 @@ def replace(text: str, rules: list[tuple[re.Pattern[str], str]]) -> str:
     return text
 
 
+# "daemon dot py", "read me dot md", "Daemon.py": up to 4 words, then the
+# extension. Not right after a path char, so existing paths stay as they are.
+_SPOKEN_FILE = re.compile(r"(?<![\w/.-])((?:[\w-]+ ){0,3}[\w-]+)(?: dot |\.)(\w+)\b", re.IGNORECASE)
+
+
+def _norm(name: str) -> str:
+    return re.sub(r"[\s_-]", "", name.replace(" dot ", ".")).lower()
+
+
+def file_paths(text: str, files: list[str]) -> str:
+    """Spoken file names -> paths from `files` (the focused terminal's repo).
+    A name shared by several files becomes just the file name."""
+    index: dict[str, str] = {}
+    for f in files:
+        base = f.rsplit("/", 1)[-1]
+        key = _norm(base)
+        index[key] = f if key not in index else base
+
+    def sub(m: re.Match[str]) -> str:
+        words = m[1].split()
+        for i in range(len(words)):  # longest name first: "the read me" -> "read me"
+            path = index.get(_norm(" ".join(words[i:])) + "." + m[2].lower())
+            if path:
+                return " ".join(words[:i] + [path])
+        return m[0]
+
+    return _SPOKEN_FILE.sub(sub, text) if index else text
+
+
 if __name__ == "__main__":
+    files = ["README.md", "src/speakit/daemon.py", "ui/vite.config.ts", "app/src/main.rs",
+             "client/src/main.rs", "install.sh", "src/speakit/__init__.py"]
+    assert file_paths("Look at daemon dot py and install dot sh.", files) == "Look at src/speakit/daemon.py and install.sh."
+    assert file_paths("Update the read me dot md", files) == "Update the README.md"
+    assert file_paths("Check vite dot config dot ts", files) == "Check ui/vite.config.ts"
+    assert file_paths("Fix main dot rs and Daemon.py", files) == "Fix main.rs and src/speakit/daemon.py"
+    assert file_paths("Edit init dot py", files) == "Edit src/speakit/__init__.py"  # underscores aren't spoken
+    assert file_paths("Edit foo dot py", files) == "Edit foo dot py"  # unknown: left alone
+    assert file_paths("In src/speakit/daemon.py, e.g. here. Then go.", files) == "In src/speakit/daemon.py, e.g. here. Then go."
+    assert file_paths("daemon dot py", []) == "daemon dot py"
+
     assert clean("Make sure that our message uh aligns with docs.") == "Make sure that our message aligns with docs."
     assert clean("I think, uh, we should") == "I think we should"
     assert clean("Um, so we go.") == "So we go."
