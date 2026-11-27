@@ -6,7 +6,7 @@ mod widgets;
 use api::{Api, Found, Hit, Item, Saved, Settings, Stats, Status, Words};
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Bounds, ClickEvent, ClipboardItem, Context, Entity, Focusable, FontWeight, KeyDownEvent, Pixels, ScrollHandle, SharedString, StyledText,
+    AnyElement, App, Bounds, ClickEvent, ClipboardItem, Context, Entity, Focusable, FontWeight, KeyDownEvent, Pixels, ScrollDelta, ScrollHandle, ScrollEvent, SharedString, StyledText,
     Subscription, TextRun, Window, WindowBounds, WindowOptions, canvas, div, font, point, px, size,
 };
 use gpui_component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
@@ -72,6 +72,14 @@ fn ease(x: f32) -> f32 {
 fn progress(now: Instant, start: Instant, delay_ms: u64, ms: u64) -> f32 {
     let t = now.saturating_duration_since(start).as_secs_f32() - delay_ms as f32 / 1000.0;
     ease(t / (ms as f32 / 1000.0))
+}
+
+/// Mouse wheel glide: cubic ease-out, so each notch moves at once and settles.
+const WHEEL_MS: u64 = 180;
+
+fn wheel_value(g: &Glide, now: Instant) -> f32 {
+    let t = (now.saturating_duration_since(g.at).as_secs_f32() / (WHEEL_MS as f32 / 1000.)).min(1.);
+    g.from + (g.to - g.from) * (1. - (1. - t).powi(3))
 }
 
 /// The sidebar pill's y: retargets from wherever it is mid-move.
@@ -166,6 +174,8 @@ struct SettingsWindow {
     target: Rc<Cell<Option<Bounds<Pixels>>>>,
     scroll: ScrollHandle,
     scroll_glide: Option<Glide>,
+    /// The glide came from a mouse wheel notch (eases out, not in-out).
+    wheel_glide: bool,
     /// Key-card easter egg: a tapped keycap latches like a recording.
     latched: [bool; 3],
     key_at: [Instant; 3],
@@ -211,6 +221,7 @@ impl SettingsWindow {
             target: Rc::new(Cell::new(None)),
             scroll: ScrollHandle::new(),
             scroll_glide: None,
+            wheel_glide: false,
         };
         this.subscriptions.push(cx.subscribe_in(&search, window, |this, _, e: &InputEvent, window, cx| match e {
             InputEvent::Change => this.on_query(window, cx),
@@ -602,14 +613,16 @@ impl SettingsWindow {
                 let want = f32::from(off.y - (b.top() - view.top() - px(96.)));
                 let want = want.clamp(-f32::from(max.y), 0.);
                 self.scroll_glide = Some(Glide { from: f32::from(off.y), to: want, at: now });
+                self.wheel_glide = false;
                 self.scroll_to = None;
             } else if self.flash.as_ref().is_none_or(|(_, at)| now.saturating_duration_since(*at) > Duration::from_secs(1)) {
                 self.scroll_to = None; // row never showed up
             }
         }
         if let Some(g) = &self.scroll_glide {
-            self.scroll.set_offset(point(px(0.), px(g.value(now, 320))));
-            if now.saturating_duration_since(g.at) > Duration::from_millis(340) {
+            let y = if self.wheel_glide { wheel_value(g, now) } else { g.value(now, 320) };
+            self.scroll.set_offset(point(px(0.), px(y)));
+            if now.saturating_duration_since(g.at) > Duration::from_millis(if self.wheel_glide { WHEEL_MS + 20 } else { 340 }) {
                 self.scroll_glide = None;
             }
         }
@@ -874,6 +887,22 @@ impl SettingsWindow {
             .h_full()
             .min_w_0()
             .relative()
+            // Runs after content-area's own wheel handler (bubble), which has already jumped.
+            .on_scroll(cx.listener(|this, e: &ScrollEvent, window, cx| {
+                // ponytail: only wheel notches glide; trackpad deltas (Pixels) are already smooth.
+                let ScrollDelta::Lines(d) = e.delta else { return };
+                let now = Instant::now();
+                let jumped = f32::from(this.scroll.offset().y);
+                let here = jumped - d.y * f32::from(window.line_height());
+                // Rapid notches stack onto the running target instead of restarting from here.
+                let base = this.scroll_glide.as_ref().filter(|_| this.wheel_glide).map_or(here, |g| g.to);
+                let to = (base + (jumped - here)).clamp(-f32::from(this.scroll.max_offset().y), 0.);
+                this.scroll.set_offset(point(px(0.), px(here)));
+                this.scroll_glide = Some(Glide { from: here, to, at: now });
+                this.wheel_glide = true;
+                this.scroll_to = None;
+                cx.notify();
+            }))
             .child(div().id("content-area").size_full().overflow_y_scroll().track_scroll(&self.scroll).child(inner))
             .vertical_scrollbar(&self.scroll)
     }
@@ -1284,8 +1313,7 @@ impl Render for SettingsWindow {
         let now = Instant::now();
         let busy = |at: Instant| now.saturating_duration_since(at) < Duration::from_millis(360);
         let keys_busy = self.key_at.iter().any(|&at| busy(at));
-        let following = self.follow_scroll(now);
-        if self.retarget(now, window, cx) || keys_busy || following || busy(self.pill.at) || busy(self.page_at) || busy(self.sel_glide.at) || self.toast.is_some() {
+        let following = self.follow_scroll(now);        if self.retarget(now, window, cx) || keys_busy || following || busy(self.pill.at) || busy(self.page_at) || busy(self.sel_glide.at) || self.toast.is_some() {
             window.request_animation_frame();
         }
         root.child(self.sidebar(now, cx)).child(self.content(now, window, cx))
